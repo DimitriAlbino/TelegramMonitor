@@ -42,6 +42,7 @@ from tgmonitor.executors.base import CheckConfig, Transport
 from tgmonitor.executors.http import HttpTransport
 from tgmonitor.models import Check
 from tgmonitor.results import Result
+from tgmonitor.worker.alerting import AlertSink
 
 log = logging.getLogger("tgmonitor.worker")
 
@@ -160,10 +161,12 @@ class CheckEngine:
         transport: Transport | None = None,
         transports: dict[str, Transport] | None = None,
         batch_limit: int = 500,
+        alert_sink: AlertSink | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.batch_limit = batch_limit
         self._semaphore = asyncio.Semaphore(self.settings.check_concurrency)
+        self._alert_sink: AlertSink | None = alert_sink
         # A transport per kind. The single ``transport`` arg (for back-compat and
         # simple tests) overrides the http entry; ``transports`` is the general form.
         from tgmonitor.executors.tcp import TcpTransport
@@ -181,10 +184,13 @@ class CheckEngine:
         return self._transports.get(kind, self._transports["http"])
 
     async def _run_one(self, monitor: ClaimedMonitor) -> None:
-        """Run one Check under the semaphore and persist its Result.
+        """Run one Check under the semaphore, persist its Result, and run the
+        Incident state machine.
 
         Never raises: any exception becomes a failing Result with a reason, so
-        one bad monitor can't take the engine down.
+        one bad monitor can't take the engine down. The state machine (ADR-0005)
+        runs after the Result is persisted and may open/close an Incident and
+        emit an Alert through the configured sink (set by T4's bot wiring).
         """
         async with self._semaphore:
             from tgmonitor.executors.base import run_check
@@ -203,8 +209,23 @@ class CheckEngine:
             try:
                 async with session_factory()() as session:
                     await persist_result(session, monitor.id, result)
+                    # Run the Incident state machine: load the Monitor row, apply
+                    # the transition, persist Incident open/close, emit alerts.
+                    from tgmonitor.models import Monitor as MonitorModel
+                    from tgmonitor.worker.alerting import apply_transition
+
+                    mon = await session.get(MonitorModel, monitor.id)
+                    if mon is not None and not mon.paused:
+                        await apply_transition(
+                            session,
+                            mon,
+                            result.success,
+                            result.reason,
+                            alert_sink=self._alert_sink,
+                        )
+                    await session.commit()
             except Exception:
-                log.exception("failed to persist result for monitor %s", monitor.id)
+                log.exception("failed to persist/transition for monitor %s", monitor.id)
 
     async def tick(self) -> int:
         """Run one tick: claim due monitors, spawn a task per claim.

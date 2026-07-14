@@ -102,12 +102,17 @@ class Monitor(Base):
         UTC_TIMESTAMP, default=utcnow, server_default=text("now()"), index=True
     )
 
-    # Incident state-machine cursor (ADR-0005). Counts are maintained by the
-    # state machine in T5; declared now so the schema is stable.
+    # Incident state-machine cursor (ADR-0005). Counts and status are maintained
+    # by the state machine in T5. The authoritative status (ok/down/flapping) is
+    # persisted here so reconstruction on the next tick is exact, not heuristic.
     failure_threshold: Mapped[int] = mapped_column(default=3, server_default=text("3"))
     recovery_threshold: Mapped[int] = mapped_column(default=2, server_default=text("2"))
     consecutive_failures: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     consecutive_successes: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+    # ok | down | flapping (the Incident SM status; CONTEXT.md / ADR-0005).
+    incident_status: Mapped[str] = mapped_column(
+        String(16), default="ok", server_default=text("'ok'")
+    )
 
     # Two independent flags. A Monitor can be neither, either, or both.
     paused: Mapped[bool] = mapped_column(default=False, server_default=text("false"))

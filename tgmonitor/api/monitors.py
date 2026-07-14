@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tgmonitor.auth.dependencies import ActiveUser
 from tgmonitor.config import get_settings
 from tgmonitor.db import get_session
+from tgmonitor.incident_model import Incident
 from tgmonitor.models import Check, Monitor, User
 
 router = APIRouter(prefix="/monitors", tags=["monitors"])
@@ -317,3 +318,44 @@ async def resume_monitor(monitor_id: int, user: ActiveUser, session: SessionDep)
     await session.commit()
     await session.refresh(monitor)
     return _to_out(monitor, None)
+
+
+class IncidentOut(BaseModel):
+    id: int
+    monitor_id: int
+    opened_at: str
+    closed_at: str | None = None
+    open_reason: str
+    close_reason: str | None = None
+    outcome: str | None = None
+
+
+def _incident_to_out(inc: Incident) -> IncidentOut:
+    return IncidentOut(
+        id=inc.id,
+        monitor_id=inc.monitor_id,
+        opened_at=inc.opened_at.isoformat() if inc.opened_at else "",
+        closed_at=inc.closed_at.isoformat() if inc.closed_at else None,
+        open_reason=inc.open_reason,
+        close_reason=inc.close_reason,
+        outcome=inc.outcome,
+    )
+
+
+@router.get("/{monitor_id}/incidents", response_model=list[IncidentOut])
+async def list_incidents(
+    monitor_id: int,
+    user: ActiveUser,
+    session: SessionDep,
+    limit: int = Query(default=50, ge=1, le=500),
+) -> list[IncidentOut]:
+    """List Incidents for a Monitor (newest first). Ownership-scoped."""
+    await _get_owned(monitor_id, user, session)
+    stmt = (
+        select(Incident)
+        .where(Incident.monitor_id == monitor_id)
+        .order_by(Incident.opened_at.desc())
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return [_incident_to_out(i) for i in rows]
