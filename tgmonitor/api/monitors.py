@@ -359,3 +359,29 @@ async def list_incidents(
     )
     rows = (await session.execute(stmt)).scalars().all()
     return [_incident_to_out(i) for i in rows]
+
+
+@router.post("/{monitor_id}/test-alert")
+async def send_test_alert(
+    monitor_id: int, user: ActiveUser, session: SessionDep
+) -> dict[str, object]:
+    """Send a synthetic test Alert to the user's linked Telegram chat.
+
+    De-risks the delivery pipe (BotFather token, webhook TLS, chat-id binding)
+    independently of the Incident state machine (T5). Requires a linked chat.
+    """
+    monitor = await _get_owned(monitor_id, user, session)
+    # Reload the user to get the freshest telegram_chat_id.
+    owner = await session.get(User, user.id)
+    chat_id = owner.telegram_chat_id if owner else None
+    if not chat_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "no linked Telegram chat; use the Link Telegram flow first",
+        )
+    from tgmonitor.telegram.client import NotificationChannel
+
+    channel = NotificationChannel()
+    text = f"🧪 <b>{monitor.name}</b> — this is a test alert. Delivery is working."
+    delivered = await channel.send(chat_id, text)
+    return {"delivered": delivered, "monitor_id": monitor.id}
