@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     # --- Logging ---
     log_level: str = Field(default="INFO")
 
+    # --- Auth (ADR-0001) ---
+    # JWT signing key — must be a long random string in production.
+    # Sessions expire after this many minutes (default ~14 days).
+    session_expire_minutes: int = Field(default=60 * 24 * 14)
+    # Rate limiting (abuse prevention, ADR-0011): max auth attempts per window.
+    auth_rate_window_s: int = Field(default=300)
+    auth_rate_max_per_ip: int = Field(default=20)
+    auth_rate_max_per_email: int = Field(default=10)
+    # Where the web UI lives, for building verification/reset links.
+    public_base_url: str = Field(default="http://localhost:8000")
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def async_database_url(self) -> str:
