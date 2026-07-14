@@ -58,6 +58,7 @@ class ClaimedMonitor:
     body_contains: str | None
     max_latency_ms: int | None
     timeout_s: float
+    tcp_timeout_s: float
 
     def to_check_config(self) -> CheckConfig:
         return CheckConfig(
@@ -68,6 +69,7 @@ class ClaimedMonitor:
             body_contains=self.body_contains,
             max_latency_ms=self.max_latency_ms,
             timeout_s=self.timeout_s,
+            tcp_timeout_s=self.tcp_timeout_s,
         )
 
 
@@ -89,10 +91,12 @@ CLAIM_DUE_SQL = text(
             FOR UPDATE SKIP LOCKED
        )
     RETURNING id, name, check_kind, target,
-              (config->>'expected_status')::int     AS expected_status,
+              COALESCE((config->>'expected_status')::int, 200) AS expected_status,
               config->>'body_contains'              AS body_contains,
               NULLIF(config->>'max_latency_ms','')::int AS max_latency_ms,
-              COALESCE(NULLIF(config->>'timeout_s','')::float, 10.0) AS timeout_s
+              COALESCE(NULLIF(config->>'timeout_s','')::float, 10.0) AS timeout_s,
+              COALESCE(NULLIF(config->>'tcp_timeout_s','')::float,
+                       NULLIF(config->>'timeout_s','')::float, 5.0) AS tcp_timeout_s
     """
 )
 
@@ -116,6 +120,7 @@ async def claim_due_monitors(session: AsyncSession, batch_limit: int) -> list[Cl
             body_contains=r.body_contains,
             max_latency_ms=r.max_latency_ms,
             timeout_s=r.timeout_s if r.timeout_s is not None else 10.0,
+            tcp_timeout_s=r.tcp_timeout_s if r.tcp_timeout_s is not None else 5.0,
         )
         for r in rows
     ]
@@ -142,24 +147,38 @@ async def persist_result(session: AsyncSession, monitor_id: int, result: Result)
 
 
 class CheckEngine:
-    """The tick-loop engine. Owns the semaphore, the transport, and the loop.
+    """The tick-loop engine. Owns the semaphore, the per-kind transports, and
+    the loop.
 
-    The transport is injected (default: a long-lived ``httpx`` client) so tests
-    can run the loop against a fake without real I/O.
+    Transports are injected per kind (default: a long-lived ``httpx`` client for
+    HTTP, ``asyncio`` sockets for TCP) so tests can run the loop against fakes.
     """
 
     def __init__(
         self,
         settings: Settings | None = None,
         transport: Transport | None = None,
+        transports: dict[str, Transport] | None = None,
         batch_limit: int = 500,
     ) -> None:
         self.settings = settings or get_settings()
         self.batch_limit = batch_limit
         self._semaphore = asyncio.Semaphore(self.settings.check_concurrency)
-        self._transport: Transport = transport or HttpTransport(httpx.AsyncClient(timeout=30.0))
+        # A transport per kind. The single ``transport`` arg (for back-compat and
+        # simple tests) overrides the http entry; ``transports`` is the general form.
+        from tgmonitor.executors.tcp import TcpTransport
+
+        self._transports: dict[str, Transport] = {
+            "http": transport or HttpTransport(httpx.AsyncClient(timeout=30.0)),
+            "tcp": TcpTransport(),
+        }
+        if transports:
+            self._transports.update(transports)
         self._tasks: set[asyncio.Task[None]] = set()
         self._stopping = False
+
+    def _transport_for(self, kind: str) -> Transport:
+        return self._transports.get(kind, self._transports["http"])
 
     async def _run_one(self, monitor: ClaimedMonitor) -> None:
         """Run one Check under the semaphore and persist its Result.
@@ -170,8 +189,9 @@ class CheckEngine:
         async with self._semaphore:
             from tgmonitor.executors.base import run_check
 
+            transport = self._transport_for(monitor.check_kind)
             try:
-                result = await run_check(monitor.to_check_config(), self._transport)
+                result = await run_check(monitor.to_check_config(), transport)
                 result = _stamp_checked_at(result)
             except Exception as exc:
                 log.exception("check for monitor %s raised", monitor.id)
