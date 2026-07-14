@@ -64,9 +64,13 @@ def _apply_migrations() -> None:
 
 
 async def _main() -> None:
+    # Wire the real Telegram alert sink so Incident transitions (T5) deliver
+    # Alerts to the user's linked chat (T4). If no bot token is configured, the
+    # sink logs and skips — the engine still runs and tracks Incidents.
+    from tgmonitor.telegram.alerting import make_alert_sink
     from tgmonitor.worker.engine import CheckEngine
 
-    engine = CheckEngine()
+    engine = CheckEngine(alert_sink=make_alert_sink(None))
     await engine.run()
 
 

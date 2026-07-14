@@ -31,6 +31,10 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tgmonitor}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-tgmonitor}
       SECRET_KEY: ${SECRET_KEY:-change-me-to-a-long-random-string}
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_LOGIN_BOT_NAME: ${TELEGRAM_LOGIN_BOT_NAME:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -48,6 +52,10 @@ services:
       CHECK_CONCURRENCY: ${CHECK_CONCURRENCY:-200}
       MIN_CHECK_INTERVAL_S: ${MIN_CHECK_INTERVAL_S:-30}
       MAX_MONITORS_PER_USER: ${MAX_MONITORS_PER_USER:-50}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_LOGIN_BOT_NAME: ${TELEGRAM_LOGIN_BOT_NAME:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
     command: ["python", "-m", "tgmonitor.worker"]
     restart: unless-stopped
 
