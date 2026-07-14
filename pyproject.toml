@@ -27,7 +27,6 @@ dev = [
     "httpx>=0.27",
     "mypy>=1.10",
     "ruff>=0.5",
-    "types-psycopg2>=2.9",
 ]
 
 # Two entrypoints share one package; the commands live under tgmonitor.api and

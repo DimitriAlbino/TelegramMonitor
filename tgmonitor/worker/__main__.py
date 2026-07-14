@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
 
 from tgmonitor.config import get_settings
 
 
 def _configure_logging() -> None:
-    level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    level = get_settings().log_level.upper()
     logging.basicConfig(
         level=getattr(logging, level, logging.INFO),
         format="%(asctime)s %(levelname)-5.5s [%(name)s] %(message)s",

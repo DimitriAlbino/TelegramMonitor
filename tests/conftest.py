@@ -6,8 +6,6 @@ no real network in tests.
 
 from __future__ import annotations
 
-import pytest
-
 from tgmonitor.executors.base import CheckConfig
 
 
@@ -62,14 +60,3 @@ def http_config(
         max_latency_ms=max_latency_ms,
         timeout_s=timeout_s,
     )
-
-
-@pytest.fixture
-def make_config() -> type[CheckConfig]:
-    """Factory alias; tests call http_config directly for clarity."""
-    return CheckConfig
-
-
-@pytest.fixture
-def fake_transport_factory() -> type[FakeTransport]:
-    return FakeTransport
