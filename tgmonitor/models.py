@@ -40,12 +40,20 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
-    # Hashed, salted. Empty for the T1 seed (no auth yet — retired in T2).
+    # Hashed with argon2 (passlib). Never stored or logged in plaintext.
     password_hash: Mapped[str] = mapped_column(String(255), default="", server_default="")
     # Telegram chat binding — populated by the account-linking flow (T4). Null
     # until linked. The Notification Channel resolves to this.
     telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    # Email verification: an account is inactive until the verification link is
+    # clicked. ``is_active`` flips to true on verification (ADR-0001).
+    is_active: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    # A signed one-time token carrying the verification intent; the JWT itself
+    # encodes the user id + purpose, so no DB column is needed for it. Reset
+    # works the same way. We track the *latest* issued token jti to invalidate
+    # stale links: a verification/reset is single-use.
+    verify_token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reset_token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         UTC_TIMESTAMP, default=utcnow, server_default=text("now()")
     )

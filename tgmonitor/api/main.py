@@ -1,8 +1,8 @@
-"""FastAPI app: healthz + recent-Results endpoint.
+"""FastAPI app: healthz, auth, and recent-Results endpoint.
 
-T1's GET endpoint is deliberately unauthenticated (auth lands in T2 and will
-retire the seed). Vocabulary is normative: the response field is ``results``,
-each item a Check Result (CONTEXT.md).
+Monitor reads are ownership-scoped: an authenticated User only sees Monitors
+they own (ADR-0001 tenant isolation). Vocabulary is normative: the response
+field is ``results``, each item a Check Result (CONTEXT.md).
 """
 
 from __future__ import annotations
@@ -15,10 +15,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tgmonitor.auth.dependencies import ActiveUser
+from tgmonitor.auth.routes import router as auth_router
 from tgmonitor.db import dispose_engine, get_engine, get_session
-from tgmonitor.models import Check, Monitor
+from tgmonitor.models import Check, Monitor, User
 
-# Annotated dependency alias — the idiomatic FastAPI form that also satisfies
+# Annotated dependency aliases — the idiomatic FastAPI form that also satisfies
 # the "no function call in default" lint rule (B008).
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
@@ -32,6 +34,18 @@ def _result_to_dict(check: Check) -> dict[str, object]:
         "latency_ms": check.latency_ms,
         "reason": check.reason,
     }
+
+
+async def _get_owned_monitor(monitor_id: int, user: User, session: AsyncSession) -> Monitor:
+    """Fetch a Monitor and assert it belongs to ``user``; 404 otherwise.
+
+    Returning 404 (not 403) for another tenant's monitor avoids leaking which
+    monitor ids exist — the tenant boundary is invisible to the caller.
+    """
+    monitor = await session.get(Monitor, monitor_id)
+    if monitor is None or monitor.user_id != user.id:
+        raise HTTPException(status_code=404, detail="monitor not found")
+    return monitor
 
 
 @asynccontextmanager
@@ -49,6 +63,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    app.include_router(auth_router)
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, object]:
@@ -72,16 +87,15 @@ def create_app() -> FastAPI:
     @app.get("/monitors/{monitor_id}/results", tags=["monitors"])
     async def list_monitor_results(
         monitor_id: int,
+        user: ActiveUser,
         session: SessionDep,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, object]:
         """Return the most recent Check Results for a Monitor (newest first).
 
-        T1: unauthenticated. T2 adds ownership scoping behind auth.
+        Ownership-scoped: a User only sees their own Monitors.
         """
-        monitor = await session.get(Monitor, monitor_id)
-        if monitor is None:
-            raise HTTPException(status_code=404, detail="monitor not found")
+        monitor = await _get_owned_monitor(monitor_id, user, session)
 
         stmt = (
             select(Check)
