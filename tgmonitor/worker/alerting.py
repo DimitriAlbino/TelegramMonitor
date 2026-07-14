@@ -18,12 +18,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tgmonitor.incident_model import Incident
 from tgmonitor.incidents import Action, CheckOutcome, MonitorState, Thresholds, step
-from tgmonitor.models import Monitor
+from tgmonitor.models import Check, Monitor
 
 log = logging.getLogger("tgmonitor.worker.alerting")
 
@@ -134,6 +134,15 @@ async def apply_transition(
                 AlertIntent(monitor.id, action, open_incident.id, result_reason),
                 monitor,
             )
+            # Post-incident Summary (ADR-0006 kind #3): a structured follow-up
+            # richer than the one-line recovery Alert, sent after the recovery
+            # Alert via the same sink. Only sent once (summary_sent_at guard).
+            if open_incident.summary_sent_at is None and alert_sink is not None:
+                open_incident.failed_check_count = await _count_failed_checks(
+                    session, monitor.id, open_incident.opened_at, open_incident.closed_at
+                )
+                open_incident.summary_sent_at = datetime.now(UTC)
+                await session.flush()
     elif action is Action.FLAP_START:
         await _maybe_alert(
             alert_sink, AlertIntent(monitor.id, action, None, "flapping detected"), monitor
@@ -154,6 +163,24 @@ async def _latest_open_incident(session: AsyncSession, monitor_id: int) -> Incid
         .limit(1)
     )
     return (await session.execute(stmt)).scalars().first()
+
+
+async def _count_failed_checks(
+    session: AsyncSession, monitor_id: int, opened_at: datetime, closed_at: datetime | None
+) -> int:
+    """Count failed Checks during an Incident span (for the post-incident summary)."""
+    end = closed_at or datetime.now(UTC)
+    stmt = (
+        select(func.count())
+        .select_from(Check)
+        .where(
+            Check.monitor_id == monitor_id,
+            Check.checked_at >= opened_at,
+            Check.checked_at <= end,
+            ~Check.success,
+        )
+    )
+    return int((await session.execute(stmt)).scalar_one())
 
 
 async def _maybe_alert(sink: AlertSink | None, intent: AlertIntent, monitor: Monitor) -> None:
