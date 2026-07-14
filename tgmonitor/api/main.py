@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tgmonitor.api.monitors import router as monitors_router
 from tgmonitor.auth.dependencies import ActiveUser
 from tgmonitor.auth.routes import router as auth_router
 from tgmonitor.db import dispose_engine, get_engine, get_session
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.include_router(auth_router)
+    app.include_router(monitors_router)
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, object]:

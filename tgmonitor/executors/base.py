@@ -61,16 +61,19 @@ class Transport(Protocol):
 async def run_check(config: CheckConfig, transport: Transport) -> Result:
     """Dispatch a Check to the right executor by ``check_kind``.
 
-    Kept import-light: the http executor is imported lazily so the module graph
-    stays clean and tcp (T3) slots in here without touching the http path.
+    Kept import-light: executors are imported lazily so the module graph stays
+    clean and adding a kind slots in here without touching the other paths.
+    An unknown kind is a configuration error, surfaced as a failing Result
+    rather than a crash — the engine must never die on one bad Monitor.
     """
-    from tgmonitor.executors.http import run_http_check
-
     if config.check_kind == "http":
+        from tgmonitor.executors.http import run_http_check
+
         return await run_http_check(config, transport)
-    # tcp lands in T3. Until then, an unknown kind is a configuration error,
-    # surfaced as a failing Result rather than a crash — the engine must never
-    # die on one bad Monitor.
+    if config.check_kind == "tcp":
+        from tgmonitor.executors.tcp import run_tcp_check
+
+        return await run_tcp_check(config, transport)
     return Result(
         success=False,
         reason=f"unsupported check_kind {config.check_kind!r}",
