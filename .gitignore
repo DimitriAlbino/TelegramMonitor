@@ -5,6 +5,11 @@
 *.pem
 *.key
 
+# --- Local deployment reference ---
+# Contains real credentials for our live instance; referenced by AGENTS.md
+# but never committed. See AGENTS.md "Deployment" section.
+.deploy/
+
 # --- Python ---
 __pycache__/
 *.py[cod]
