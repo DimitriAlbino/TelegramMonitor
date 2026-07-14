@@ -266,6 +266,14 @@ class CheckEngine:
                 await self.tick()
             except Exception:
                 log.exception("tick failed")
+            # Run the report scheduler each tick too (ADR-0006): it claims due
+            # reports, renders the digest, delivers, advances next_run_at.
+            try:
+                from tgmonitor.reports import run_report_tick
+
+                await run_report_tick(None)
+            except Exception:
+                log.exception("report tick failed")
             await asyncio.sleep(self.settings.check_tick_interval_s)
 
         # Graceful shutdown: let in-flight checks finish before exiting.

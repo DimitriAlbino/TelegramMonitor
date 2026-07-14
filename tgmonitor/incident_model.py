@@ -44,6 +44,9 @@ class Incident(Base):
     outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Counts/summary filled on close for the post-incident summary (T7).
     failed_check_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # When the post-incident summary was sent (ADR-0006 kind #3), so we don't
+    # resend. Null until sent.
+    summary_sent_at: Mapped[datetime | None] = mapped_column(UTC_TIMESTAMP, nullable=True)
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, default=dict, server_default="{}"
     )

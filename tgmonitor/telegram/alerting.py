@@ -85,6 +85,17 @@ def make_alert_sink(
                 _queue_digest(user.id, text)
                 return
             await ch.send(user.telegram_chat_id, text)
+            # Post-incident Summary (ADR-0006 kind #3): after a recovery Alert,
+            # send a structured follow-up. The bridge already populated
+            # failed_check_count and set summary_sent_at; render + send here.
+            if intent.action is Action.CLOSE_INCIDENT and intent.incident_id is not None:
+                from tgmonitor.incident_model import Incident
+                from tgmonitor.reports import render_post_incident_summary
+
+                inc = await session.get(Incident, intent.incident_id)
+                if inc is not None and inc.summary_sent_at is not None:
+                    summary = await render_post_incident_summary(session, inc)
+                    await ch.send(user.telegram_chat_id, summary)
 
     return sink
 
