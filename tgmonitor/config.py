@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     min_check_interval_s: int = Field(default=30)
     max_monitors_per_user: int = Field(default=50)
 
+    # --- Logging ---
+    log_level: str = Field(default="INFO")
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def async_database_url(self) -> str:

@@ -12,9 +12,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tgmonitor}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    # TimescaleDB is loaded via CREATE EXTENSION in the migration; the image
-    # ships it. This healthcheck confirms the server is accepting connections
-    # and the extension library is present.
+    # Confirms the server accepts connections. (TimescaleDB itself is enabled by
+    # CREATE EXTENSION in the migration, not asserted here — the image ships it.)
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-tgmonitor}", "-d", "${POSTGRES_DB:-tgmonitor}"]
       interval: 5s
