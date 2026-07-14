@@ -59,8 +59,7 @@ def upgrade() -> None:
     # retention to the materialization view directly; the policy survives
     # version differences by referencing the view name.
     op.execute(
-        "SELECT add_retention_policy('checks_hourly', INTERVAL '1 year', "
-        "if_not_exists => true)"
+        "SELECT add_retention_policy('checks_hourly', INTERVAL '1 year', if_not_exists => true)"
     )
 
     # --- Daily rollup continuous aggregate (retained forever) ---

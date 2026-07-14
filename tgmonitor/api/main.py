@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tgmonitor.api.monitors import router as monitors_router
 from tgmonitor.api.reports import router as reports_router
+from tgmonitor.api.statuspage import config_router as statuspage_config_router
+from tgmonitor.api.statuspage import public_router as statuspage_public_router
 from tgmonitor.auth.dependencies import ActiveUser
 from tgmonitor.auth.routes import router as auth_router
 from tgmonitor.db import dispose_engine, get_engine, get_session
@@ -69,6 +71,8 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(monitors_router)
     app.include_router(reports_router)
+    app.include_router(statuspage_config_router)
+    app.include_router(statuspage_public_router)
     app.include_router(telegram_router)
 
     @app.get("/healthz", tags=["meta"])
