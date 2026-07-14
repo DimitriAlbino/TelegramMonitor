@@ -52,7 +52,10 @@ def make_alert_sink(
     ch = channel or NotificationChannel()
 
     async def sink(intent: AlertIntent) -> None:
+        from datetime import UTC, datetime
+
         from tgmonitor.db import session_factory as sf
+        from tgmonitor.telegram.quiet_hours import should_defer
 
         async with sf()() as session:
             monitor = await session.get(Monitor, intent.monitor_id)
@@ -66,6 +69,41 @@ def make_alert_sink(
             text = format_alert(intent, monitor.name)
             if text is None:
                 return
+            # Quiet hours (ADR-0005): defer non-critical Alerts into the digest
+            # when inside the window; critical Monitors page immediately.
+            now = datetime.now(UTC)
+            if should_defer(
+                now_utc=now,
+                start_hhmm=user.quiet_hours_start,
+                end_hhmm=user.quiet_hours_end,
+                tz_name=user.quiet_hours_tz,
+                critical=monitor.critical,
+            ):
+                log.info(
+                    "deferring non-critical alert for monitor %s (quiet hours)", intent.monitor_id
+                )
+                _queue_digest(user.id, text)
+                return
             await ch.send(user.telegram_chat_id, text)
 
     return sink
+
+
+# --- In-process digest queue (single-VPS launch envelope) ---
+# Keyed by user id; each value is a list of deferred Alert texts. Flushed by the
+# worker's tick loop when the quiet window ends (T6's quiet-hours flusher).
+import asyncio  # noqa: E402
+
+_digest_lock = asyncio.Lock()
+_digests: dict[int, list[str]] = {}
+
+
+def _queue_digest(user_id: int, text: str) -> None:
+    """Append a deferred Alert to the user's digest queue (thread-safe-ish)."""
+    _digests.setdefault(user_id, []).append(text)
+
+
+async def flush_digest(user_id: int) -> list[str]:
+    """Pop and return the user's queued digest messages. Empty if none."""
+    async with _digest_lock:
+        return _digests.pop(user_id, [])

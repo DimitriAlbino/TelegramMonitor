@@ -54,6 +54,12 @@ class User(Base):
     # stale links: a verification/reset is single-use.
     verify_token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reset_token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Per-User quiet hours (ADR-0005): "HH:MM" start/end in the user's local
+    # time, or NULL if disabled. Non-critical Alerts during the window are
+    # deferred into a digest at window end; critical Monitors bypass.
+    quiet_hours_start: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    quiet_hours_end: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    quiet_hours_tz: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         UTC_TIMESTAMP, default=utcnow, server_default=text("now()")
     )

@@ -79,18 +79,35 @@ async def telegram_webhook(
 
     if cmd == "start":
         await _handle_start(session, chat_id, arg)
+        return {"status": "ok"}
+
+    # All other commands require a linked chat. Unrecognized chat → "please link".
+    user = await _user_for_chat(session, chat_id)
+    if user is None:
+        await _reply(
+            chat_id,
+            "I don't recognize this chat. Please link your account at "
+            f"{get_settings().public_base_url}",
+        )
+        return {"status": "ok"}
+
+    from tgmonitor.telegram import commands
+
+    if cmd == "status":
+        reply = await commands.cmd_status(session, user.id)
+    elif cmd == "mute":
+        reply = await commands.cmd_mute(session, user.id, arg)
+    elif cmd == "unmute":
+        reply = await commands.cmd_unmute(session, user.id, arg)
+    elif cmd == "incidents":
+        reply = await commands.cmd_incidents(session, user.id)
+    elif cmd == "help":
+        reply = await commands.cmd_help()
+    elif cmd == "":
+        return {"status": "ignored"}  # non-text message
     else:
-        # Other commands (/status, /mute, /incidents, /help) land in T6. Until
-        # then, reply with a pointer; an unlinked chat gets "please link".
-        user = await _user_for_chat(session, chat_id)
-        if user is None:
-            await _reply(
-                chat_id,
-                "I don't recognize this chat. Please link your account at "
-                f"{get_settings().public_base_url}",
-            )
-        else:
-            await _reply(chat_id, "Commands like /status and /help arrive soon.")
+        reply = commands.unknown_command_reply()
+    await _reply(chat_id, reply)
     return {"status": "ok"}
 
 
