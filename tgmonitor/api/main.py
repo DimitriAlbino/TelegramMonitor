@@ -20,6 +20,7 @@ from tgmonitor.auth.dependencies import ActiveUser
 from tgmonitor.auth.routes import router as auth_router
 from tgmonitor.db import dispose_engine, get_engine, get_session
 from tgmonitor.models import Check, Monitor, User
+from tgmonitor.telegram.webhook import router as telegram_router
 
 # Annotated dependency aliases — the idiomatic FastAPI form that also satisfies
 # the "no function call in default" lint rule (B008).
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(auth_router)
     app.include_router(monitors_router)
+    app.include_router(telegram_router)
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, object]:
