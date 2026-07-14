@@ -1,0 +1,30 @@
+# Build context exclusions — keep the image lean and avoid copying secrets.
+.git
+.gitignore
+.github
+.venv
+venv
+env
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets / local-only
+.env
+.env.*
+!.env.example
+.deploy/
+
+# Local DB data
+pgdata/
+*.sqlite3
+
+# Docs don't belong in the runtime image
+docs/
+*.md
+!README.md

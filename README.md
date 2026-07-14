@@ -60,6 +60,12 @@ ubiquitous language (Monitor, Check, Incident, Alert, Report, Status Page, …) 
 ├── CONTEXT.md                      # domain glossary (the nouns)
 ├── README.md                       # this file
 ├── telegram-status-alerting.md     # the reference pattern this project generalizes
+├── pyproject.toml                  # project + tooling config (pytest, ruff, mypy)
+├── Dockerfile                      # one image; api + worker pick the entrypoint
+├── docker-compose.yml              # api, worker, db (Postgres+Timescale)
+├── alembic.ini + alembic/          # migrations (core schema + walking-skeleton seed)
+├── tgmonitor/                      # the package (config, db, models, executors, api, worker)
+├── tests/                          # unit tests (Seam B: executor with fake transport)
 └── docs/
     └── adr/                        # architectural decision records
         ├── 0001-hosted-multi-tenant-saas.md
@@ -68,7 +74,38 @@ ubiquitous language (Monitor, Check, Incident, Alert, Report, Status Page, …) 
         └── 0012-telegram-webhook-inbound.md
 ```
 
-Implementation directories (`api/`, `worker/`, etc.) will appear here once build begins.
+## Run locally
+
+The stack is three Docker Compose services: `db` (Postgres with TimescaleDB),
+`worker` (the Check engine), and `api` (FastAPI). The worker applies migrations
+on startup, so a fresh `docker compose up` is immediately runnable and seeded
+with one demo Monitor probing `https://example.com` every 30s.
+
+```bash
+cp .env.example .env          # then edit real secrets into .env (never committed)
+docker compose up --build     # db healthy → api on :8000 → worker probing
+```
+
+Watch the worker probe and stream Results:
+
+```bash
+docker compose logs -f worker
+curl http://localhost:8000/healthz
+curl 'http://localhost:8000/monitors/1/results?limit=5' | python -m json.tool
+```
+
+The `results` array grows by one row per Check (every ~30s for the seed).
+
+### Development (without Docker)
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+pytest                         # unit tests (Seam B; no network, no DB)
+mypy tgmonitor                 # typecheck
+ruff check && ruff format --check   # lint
+alembic upgrade head --sql     # emit migration SQL offline (no DB needed)
+```
 
 ## Status & roadmap
 

@@ -1,0 +1,56 @@
+# Three services: api (FastAPI), worker (Check engine), db (Postgres+Timescale).
+# The worker applies migrations on startup, so a fresh `docker compose up` is
+# immediately runnable. See README "Run locally".
+#
+# Real secrets live in .env (git-ignored). Copy .env.example to .env first.
+services:
+  db:
+    image: timescale/timescaledb:2.17.2-pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tgmonitor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-tgmonitor}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # TimescaleDB is loaded via CREATE EXTENSION in the migration; the image
+    # ships it. This healthcheck confirms the server is accepting connections
+    # and the extension library is present.
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-tgmonitor}", "-d", "${POSTGRES_DB:-tgmonitor}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tgmonitor}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-tgmonitor}
+      SECRET_KEY: ${SECRET_KEY:-change-me-to-a-long-random-string}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  worker:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tgmonitor}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-tgmonitor}
+      SECRET_KEY: ${SECRET_KEY:-change-me-to-a-long-random-string}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CHECK_TICK_INTERVAL_S: ${CHECK_TICK_INTERVAL_S:-5}
+      CHECK_CONCURRENCY: ${CHECK_CONCURRENCY:-200}
+      MIN_CHECK_INTERVAL_S: ${MIN_CHECK_INTERVAL_S:-30}
+      MAX_MONITORS_PER_USER: ${MAX_MONITORS_PER_USER:-50}
+    command: ["python", "-m", "tgmonitor.worker"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
