@@ -41,10 +41,6 @@ def is_valid_hhmm(s: str | None) -> bool:
     return parse_hhmm(s) is not None
 
 
-# Kept as the internal alias the matcher already uses.
-_parse_hhmm = parse_hhmm
-
-
 def is_in_quiet_window(
     now_utc: datetime,
     start_hhmm: str | None,
@@ -56,8 +52,8 @@ def is_in_quiet_window(
     Returns False if quiet hours are not configured (any of start/end/tz missing)
     or unparseable. Handles windows crossing midnight (start > end).
     """
-    start = _parse_hhmm(start_hhmm)
-    end = _parse_hhmm(end_hhmm)
+    start = parse_hhmm(start_hhmm)
+    end = parse_hhmm(end_hhmm)
     if start is None or end is None or not tz_name:
         return False
     try:

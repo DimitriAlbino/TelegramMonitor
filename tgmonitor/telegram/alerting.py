@@ -15,25 +15,17 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from html import escape
 
 from tgmonitor.incidents import Action
 from tgmonitor.models import Monitor, User
 from tgmonitor.telegram.client import NotificationChannel
+from tgmonitor.telegram.html import esc_html
 from tgmonitor.worker.alerting import AlertIntent, AlertSink
 
 log = logging.getLogger("tgmonitor.telegram.alerting")
 
-
-def _esc(text: str) -> str:
-    """HTML-escape user-controlled text interpolated into parse_mode=HTML (#28).
-
-    Telegram's HTML mode parses entities strictly; a stray ``<`` (a Monitor
-    named ``a<b`` or a reason containing a ``body_contains`` keyword like
-    ``<div id="app">``) makes the API reject the message with 400 "can't parse
-    entities", so the Alert never delivers.
-    """
-    return escape(text, quote=True)
+# Shared HTML-escape helper for parse_mode=HTML messages (#28).
+_esc = esc_html
 
 
 def format_alert(intent: AlertIntent, monitor_name: str) -> str | None:
