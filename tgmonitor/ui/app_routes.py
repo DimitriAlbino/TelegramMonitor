@@ -29,8 +29,14 @@ templates = Jinja2Templates(directory="templates")
 def _render(
     request: Request, name: str, ctx: dict[str, Any] | None = None, status_code: int = 200
 ) -> Any:
-    """Render with the session user injected into the nav context."""
-    base: dict[str, Any] = {"request": request}
+    """Render a template, injecting the session user for the nav.
+
+    The cookie-session dependency stores the resolved user on ``request.state``
+    so it's available here without every route passing it explicitly. base.html
+    checks ``current_user`` to show the nav links.
+    """
+    current_user = getattr(request.state, "user", None)
+    base: dict[str, Any] = {"request": request, "current_user": current_user}
     if ctx:
         base.update(ctx)
     return templates.TemplateResponse(request, name, base, status_code=status_code)
