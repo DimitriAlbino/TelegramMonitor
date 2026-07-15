@@ -110,7 +110,6 @@ async def _render_page(session: AsyncSession, page: StatusPage) -> dict[str, obj
             {
                 "name": m.name,
                 "check_kind": m.check_kind,
-                "target": m.target,
                 **_monitor_state(latest),
                 "incidents": [
                     {
