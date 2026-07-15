@@ -184,13 +184,10 @@ class CheckEngine:
         from tgmonitor.executors.tcp import TcpTransport
 
         self._transports: dict[str, Transport] = {
-            # follow_redirects=True at the client level is the reliable default;
-            # per-request follow_redirects=False correctly overrides it for
-            # monitors that don't want redirects. Setting it only per-request
-            # is unreliable when connections are pooled and reused (httpx may
-            # return a cached redirect response from the pool).
-            "http": transport
-            or HttpTransport(httpx.AsyncClient(timeout=30.0, follow_redirects=True)),
+            # HttpTransport follows redirects manually (client-level follow is
+            # off) so each hop can be re-pinned to a vetted IP (#39); the
+            # per-monitor follow_redirects flag is honoured inside request().
+            "http": transport or HttpTransport(httpx.AsyncClient(timeout=30.0)),
             "tcp": TcpTransport(),
         }
         if transports:
@@ -228,20 +225,26 @@ class CheckEngine:
                 async with session_factory()() as session:
                     await persist_result(session, monitor.id, result)
                     # Run the Incident state machine: load the Monitor row, apply
-                    # the transition, persist Incident open/close, emit alerts.
+                    # the transition, persist Incident open/close. Alerts are
+                    # collected and delivered AFTER commit (#41) so the per-monitor
+                    # advisory lock is not held across the Telegram round-trip.
                     from tgmonitor.models import Monitor as MonitorModel
-                    from tgmonitor.worker.alerting import apply_transition
+                    from tgmonitor.worker.alerting import (
+                        AlertIntent,
+                        apply_transition,
+                        deliver_alerts,
+                    )
 
+                    intents: list[AlertIntent] = []
+                    muted = False
                     mon = await session.get(MonitorModel, monitor.id)
                     if mon is not None and not mon.paused:
-                        await apply_transition(
-                            session,
-                            mon,
-                            result.success,
-                            result.reason,
-                            alert_sink=self._alert_sink,
+                        intents = await apply_transition(
+                            session, mon, result.success, result.reason
                         )
+                        muted = mon.muted  # capture before commit expires the row
                     await session.commit()
+                    await deliver_alerts(self._alert_sink, intents, muted=muted)
             except Exception:
                 log.exception("failed to persist/transition for monitor %s", monitor.id)
 

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from tgmonitor.reports import next_run_for_delivery_time
 
 
@@ -109,12 +111,34 @@ def test_render_scheduled_report_passes_monitor_id_to_filter() -> None:
     assert "monitors.id = " not in unscoped.stmts[0]
 
 
-def test_create_report_validates_monitor_id_ownership() -> None:
-    """create_report must reject a monitor_id owned by another user (#31)."""
-    import inspect
+async def test_create_report_rejects_unowned_monitor() -> None:
+    """create_report rejects a monitor_id not owned by the caller with 404 (#31).
 
-    from tgmonitor.api.reports import create_report
+    Behavioral: the ownership SELECT returns None (not owned), so the handler
+    must raise 404 and never persist a cross-tenant report.
+    """
+    from fastapi import HTTPException
 
-    src = inspect.getsource(create_report)
-    assert "monitor_id is not None" in src
-    assert "404" in src or "not found" in src
+    from tgmonitor.api.reports import ReportCreate, create_report
+
+    added = False
+
+    class _Session:
+        async def scalar(self, stmt):
+            return None  # monitor 42 is not owned by this user
+
+        def add(self, obj):
+            nonlocal added
+            added = True
+
+        async def commit(self):
+            pass
+
+    class _User:
+        id = 1
+
+    body = ReportCreate(cadence="daily", monitor_id=42)
+    with pytest.raises(HTTPException) as ei:
+        await create_report(body, _User(), _Session())
+    assert ei.value.status_code == 404
+    assert added is False, "a rejected report must not be persisted"

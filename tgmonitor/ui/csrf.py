@@ -47,7 +47,9 @@ class OriginCsrfMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app: object, *, permitted_hosts: set[str] | None = None) -> None:
         super().__init__(app)  # type: ignore[arg-type]
-        self._permitted_hosts = permitted_hosts or {"localhost", "127.0.0.1"}
+        # None → derive per-request from settings (public host, plus localhost
+        # only outside production, #43). An explicit set overrides (tests).
+        self._permitted_hosts = permitted_hosts
 
     def _is_protected(self, request: StarletteRequest) -> bool:
         if request.method not in UNSAFE_METHODS:
@@ -63,8 +65,17 @@ class OriginCsrfMiddleware(BaseHTTPMiddleware):
             # Lazy-import settings to avoid circular import at module load.
             from tgmonitor.config import get_settings
 
-            hosts = set(self._permitted_hosts)
-            own = urlparse(get_settings().public_base_url)
+            settings = get_settings()
+            if self._permitted_hosts is not None:
+                hosts = set(self._permitted_hosts)
+            else:
+                # Derived allow-list: the deployment's own host always; localhost
+                # variants only outside production so a prod origin check cannot
+                # be satisfied by a localhost Origin (#43).
+                hosts = set()
+                if settings.environment != "production":
+                    hosts |= {"localhost", "127.0.0.1", "localhost:8000", "127.0.0.1:8000"}
+            own = urlparse(settings.public_base_url)
             if own.netloc:
                 hosts.add(own.netloc.lower())
             origin = request.headers.get("origin") or request.headers.get("referer")

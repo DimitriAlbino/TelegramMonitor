@@ -13,6 +13,7 @@ publish manual posts.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -64,6 +65,30 @@ def _monitor_state(latest: Check | None) -> dict[str, object]:
     }
 
 
+def _status_item(
+    monitor: Monitor, latest: Check | None, incidents: Sequence[Incident]
+) -> dict[str, object]:
+    """Build one public status-page monitor entry (#33/#44).
+
+    Extracted so the "never expose the raw target" rule is unit-testable: the
+    HTML page omits ``target`` and the JSON view must too — the entry carries the
+    name, kind, live state, and recent incidents, but never the origin URL.
+    """
+    return {
+        "name": monitor.name,
+        "check_kind": monitor.check_kind,
+        **_monitor_state(latest),
+        "incidents": [
+            {
+                "opened_at": i.opened_at.isoformat() if i.opened_at else None,
+                "closed_at": i.closed_at.isoformat() if i.closed_at else None,
+                "open_reason": i.open_reason,
+            }
+            for i in incidents
+        ],
+    }
+
+
 async def _render_page(session: AsyncSession, page: StatusPage) -> dict[str, object]:
     """Build the public page payload from opted-in Monitors + Incidents."""
     monitors = (
@@ -106,23 +131,7 @@ async def _render_page(session: AsyncSession, page: StatusPage) -> dict[str, obj
             .scalars()
             .all()
         )
-        items.append(
-            {
-                "name": m.name,
-                "check_kind": m.check_kind,
-                # Do NOT expose the raw target (#33): the HTML page omits it but
-                # the JSON view leaked each monitor's origin/internal URL.
-                **_monitor_state(latest),
-                "incidents": [
-                    {
-                        "opened_at": i.opened_at.isoformat() if i.opened_at else None,
-                        "closed_at": i.closed_at.isoformat() if i.closed_at else None,
-                        "open_reason": i.open_reason,
-                    }
-                    for i in incs
-                ],
-            }
-        )
+        items.append(_status_item(m, latest, incs))
     return {
         "slug": page.slug,
         "title": page.title,

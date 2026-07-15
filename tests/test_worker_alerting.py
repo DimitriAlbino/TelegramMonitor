@@ -85,7 +85,7 @@ async def test_apply_transition_takes_per_monitor_lock_first() -> None:
         consecutive_successes = 0
         muted = False
 
-    await apply_transition(session, M(), True, "ok", alert_sink=None)
+    await apply_transition(session, M(), True, "ok")
     assert session.executed, "apply_transition should issue SQL"
     first_sql = session.executed[0][0]
     assert "pg_advisory_xact_lock" in first_sql, (
@@ -115,16 +115,11 @@ async def test_apply_transition_takes_per_monitor_lock_first() -> None:
 async def test_sink_does_not_receive_summary_via_pre_stamp() -> None:
     """summary_sent_at must not be set before the sink confirms delivery (#21).
 
-    The bridge must hand the incident to the sink and let the sink stamp the
-    flag after a successful send — never pre-stamp. We assert the bridge leaves
-    the (mocked) Incident's summary_sent_at untouched on close, and emits a
-    CLOSE intent carrying the incident_id so the sink can send the summary.
+    The bridge must return the CLOSE intent for post-commit delivery and leave
+    the (mocked) Incident's summary_sent_at untouched on close (the sink stamps
+    it only after a confirmed send). apply_transition itself no longer sends
+    anything (#41); it returns the intents the engine delivers after commit.
     """
-    captured: list = []
-
-    async def recording_sink(intent):
-        captured.append(intent)
-
     session = _FakeSession()
     # A fake open incident for _latest_open_incident to find and close.
     from datetime import UTC, datetime
@@ -153,9 +148,27 @@ async def test_sink_does_not_receive_summary_via_pre_stamp() -> None:
         consecutive_successes = 0
         muted = False
 
-    await apply_transition(session, M2(), True, "recovered", alert_sink=recording_sink)
-    close_intents = [i for i in captured if i.action.value == "close_incident"]
-    assert close_intents, "a recovery should emit a CLOSE_INCIDENT intent"
+    intents = await apply_transition(session, M2(), True, "recovered")
+    close_intents = [i for i in intents if i.action.value == "close_incident"]
+    assert close_intents, "a recovery should return a CLOSE_INCIDENT intent"
     assert close_intents[0].incident_id == 5
     # The bridge must NOT have pre-stamped summary_sent_at (#21).
     assert fake_incident.summary_sent_at is None
+
+
+@pytest.mark.asyncio
+async def test_deliver_alerts_suppressed_when_muted() -> None:
+    """deliver_alerts must not call the sink for a muted monitor (#41)."""
+    from tgmonitor.incidents import Action
+    from tgmonitor.worker.alerting import AlertIntent, deliver_alerts
+
+    calls: list = []
+
+    async def sink(intent):
+        calls.append(intent)
+
+    intent = AlertIntent(monitor_id=7, action=Action.OPEN_INCIDENT, incident_id=1, reason="down")
+    await deliver_alerts(sink, [intent], muted=True)
+    assert calls == [], "muted monitor must not deliver"
+    await deliver_alerts(sink, [intent], muted=False)
+    assert calls == [intent], "un-muted monitor must deliver"

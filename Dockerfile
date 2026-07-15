@@ -10,19 +10,26 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# `pip install .` builds and installs the package via hatchling, which needs the
-# manifest, the readme (pyproject sets `readme = "README.md"`), AND the package
-# source present at build time — so copy all of them before installing. (An
-# earlier attempt to install from the manifest alone, before copying sources,
-# broke the build: hatchling aborts with "Readme file does not exist".) uv.lock
-# pins resolved versions when present; the pip cache mount speeds rebuilds.
-COPY pyproject.toml uv.lock* README.md alembic.ini ./
+# Pinned, reproducible dependency install from uv.lock (#42): uv (from its
+# published image) exports the locked versions to a requirements file, which pip
+# installs; the project itself is installed --no-deps afterward. Dependencies
+# live in their own layer, so a source change no longer rebuilds them — the layer
+# busts only when pyproject.toml / uv.lock change.
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --no-dev --no-emit-project --no-hashes \
+        --format requirements-txt -o /tmp/requirements.txt \
+    && pip install --root-user-action=ignore -r /tmp/requirements.txt
+
+# Project sources copied after deps. `pip install --no-deps .` builds the wheel
+# via hatchling, which needs README.md (pyproject `readme = "README.md"`) and the
+# package source present — so both are here before the install.
+COPY README.md alembic.ini ./
 COPY alembic ./alembic
 COPY tgmonitor ./tgmonitor
 COPY templates ./templates
 COPY static ./static
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --root-user-action=ignore .
+RUN pip install --root-user-action=ignore --no-deps .
 
 # Non-root user: the container shouldn't run as root.
 RUN useradd --create-home --uid 10001 appuser

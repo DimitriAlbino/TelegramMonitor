@@ -106,27 +106,46 @@ def test_resolver_default_uses_real_dns_for_public() -> None:
 
 # --- Regression tests for the production redirect path (#22) ---
 #
-# The SSRF re-validation hook must be attached to an *injected* client (the
-# pooled client the worker engine builds), not only to the per-request client
-# created inside HttpTransport. Otherwise redirect targets are never re-checked
-# in production and an external URL that 302s to an internal address bypasses
-# the guard entirely.
+# Redirects are followed manually and each hop is re-pinned to a vetted IP (#39),
+# so an external URL that 302s to an internal address is refused on the
+# production (pooled-client) path. The transport connects to the exact address
+# it validated, closing the DNS-rebinding TOCTOU.
 
 
-def test_http_transport_attaches_ssrf_hook_to_injected_client() -> None:
-    import httpx
+def test_pin_target_rewrites_hostname_to_validated_ip() -> None:
+    """A hostname is rewritten to its vetted IP with Host+SNI preserved (#39)."""
+    import tgmonitor.executors.http as http_mod
+    from tgmonitor.executors import ssrf
 
-    from tgmonitor.executors.http import HttpTransport, _ssrf_request_hook
+    # Fake the resolver so no real DNS runs: example.test -> a public IP.
+    orig = ssrf._default_resolver
+    ssrf._default_resolver = lambda h: ["93.184.216.34"]
+    try:
+        pinned, host_header, sni = http_mod._pin_target("https://example.test:8443/path?q=1")
+    finally:
+        ssrf._default_resolver = orig
+    assert pinned == "https://93.184.216.34:8443/path?q=1"
+    assert host_header == "example.test:8443"
+    assert sni == "example.test"
 
-    client = httpx.AsyncClient()
-    HttpTransport(client)
-    assert _ssrf_request_hook in client.event_hooks.get("request", []), (
-        "the SSRF hook must be registered on an injected (pooled) client"
-    )
+
+def test_pin_target_refuses_hostname_resolving_internal() -> None:
+    """DNS-rebinding: a name resolving to an internal IP is refused at pin (#39)."""
+    import tgmonitor.executors.http as http_mod
+    from tgmonitor.executors import ssrf
+    from tgmonitor.executors.ssrf import DestinationBlocked
+
+    orig = ssrf._default_resolver
+    ssrf._default_resolver = lambda h: ["169.254.169.254"]  # metadata endpoint
+    try:
+        with pytest.raises(DestinationBlocked):
+            http_mod._pin_target("http://rebind.test/latest/meta-data")
+    finally:
+        ssrf._default_resolver = orig
 
 
 async def test_http_redirect_to_internal_is_blocked() -> None:
-    """A 302 from a public target to an internal address is refused (#22)."""
+    """A 302 from a public target to an internal address is refused (#39)."""
     import httpx
 
     from tgmonitor.executors.base import CheckConfig
@@ -138,8 +157,9 @@ async def test_http_redirect_to_internal_is_blocked() -> None:
         return httpx.Response(200, text="leaked internal content")
 
     # Public literal IP as the start target so no real DNS is needed; the
-    # injected client mirrors the engine's pooled follow_redirects client.
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
+    # injected client mirrors the engine's pooled client. The redirect hop to an
+    # internal literal is re-pinned and refused before any content is read.
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     transport = HttpTransport(client)
     cfg = CheckConfig(
         monitor_id=1,

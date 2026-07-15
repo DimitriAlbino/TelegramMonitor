@@ -171,3 +171,46 @@ class _Settings:
 
     def __init__(self, public_base_url: str) -> None:
         self.public_base_url = public_base_url
+
+
+# --- session revocation is actually enforced on the cookie path (#30/#44) ---
+
+
+async def test_cookie_session_rejected_after_version_bump() -> None:
+    """A token issued before a session_version bump is rejected with 401 (#30).
+
+    Behavioral: drive get_current_user_cookie with a stale token (sv=0) against a
+    user whose session_version was bumped to 1 (logout / password reset), and
+    assert it 401s. A matching version still authenticates.
+    """
+    from fastapi import HTTPException
+
+    from tgmonitor.auth.tokens import create_session_token
+    from tgmonitor.ui.session import get_current_user_cookie
+
+    class _Req:
+        class state:
+            pass
+
+    class _User:
+        def __init__(self, sv: int) -> None:
+            self.id = 1
+            self.session_version = sv
+
+    class _Session:
+        def __init__(self, user) -> None:
+            self._user = user
+
+        async def get(self, _model, _pk):
+            return self._user
+
+    stale_token = create_session_token(1, session_version=0)
+
+    # Bumped user (sv=1) → stale sv=0 token is revoked.
+    with pytest.raises(HTTPException) as ei:
+        await get_current_user_cookie(_Req(), _Session(_User(sv=1)), tgm_session=stale_token)
+    assert ei.value.status_code == 401
+
+    # Matching version → still authenticates.
+    user = await get_current_user_cookie(_Req(), _Session(_User(sv=0)), tgm_session=stale_token)
+    assert user.session_version == 0

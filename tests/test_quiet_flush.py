@@ -137,3 +137,63 @@ async def test_empty_queue_is_noop() -> None:
     n = await alerting.flush_due_digests(channel=ch)
     assert n == 0
     assert ch.sent == []
+
+
+# --- Digest robustness (#40): chunking, re-queue on failure, bounded queue ---
+
+
+class _FailingChannel:
+    """Fails the send at index `fail_at` (0-based), succeeds otherwise."""
+
+    def __init__(self, fail_at: int | None = None) -> None:
+        self.sent: list[tuple[str, str]] = []
+        self.fail_at = fail_at
+
+    async def send(self, chat_id, text):
+        idx = len(self.sent)
+        self.sent.append((chat_id, text))
+        return not (self.fail_at is not None and idx == self.fail_at)
+
+
+async def test_long_digest_split_into_multiple_messages() -> None:
+    """A digest exceeding Telegram's 4096-char limit is chunked (#40)."""
+    # 60 messages of ~100 chars each ≈ 6000 chars → must span >1 message.
+    alerting._digests[1] = [f"🔴 monitor-{i} is down " + "x" * 90 for i in range(60)]
+    ch = _FakeChannel()
+    n = await alerting.flush_due_digests(
+        channel=ch,
+        now_utc=datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
+        user_lookup=_FakeLookup(_FakeUser()),
+    )
+    assert n == 1
+    assert len(ch.sent) >= 2, "an over-limit digest must be split"
+    assert all(len(body) <= alerting.TELEGRAM_MAX_CHARS for _, body in ch.sent)
+    assert alerting._digests.get(1) is None  # fully drained on success
+
+
+async def test_failed_chunk_is_requeued_not_dropped() -> None:
+    """If a chunk send fails, that chunk and the rest are re-queued (#40)."""
+    msgs = [f"🔴 m{i} " + "y" * 90 for i in range(60)]
+    alerting._digests[1] = list(msgs)
+    ch = _FailingChannel(fail_at=1)  # first chunk ok, second fails
+    n = await alerting.flush_due_digests(
+        channel=ch,
+        now_utc=datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
+        user_lookup=_FakeLookup(_FakeUser()),
+    )
+    assert n == 0, "a failed chunk means the digest is not counted delivered"
+    requeued = alerting._digests.get(1) or []
+    assert requeued, "failed + remaining messages must be re-queued, never dropped"
+    # The messages carried by the first (successful) chunk are gone; the rest stay.
+    assert len(requeued) < len(msgs)
+
+
+async def test_queue_is_bounded_per_user() -> None:
+    """The per-user queue cannot grow past the cap; oldest are dropped (#40)."""
+    for i in range(alerting.MAX_QUEUED_PER_USER + 50):
+        alerting._queue_digest(9, f"msg-{i}")
+    q = alerting._digests[9]
+    assert len(q) == alerting.MAX_QUEUED_PER_USER
+    # Oldest dropped: the newest message is retained, the very first is gone.
+    assert q[-1] == f"msg-{alerting.MAX_QUEUED_PER_USER + 49}"
+    assert "msg-0" not in q

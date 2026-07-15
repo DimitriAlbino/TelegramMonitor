@@ -81,14 +81,17 @@ async def apply_transition(
     monitor: Monitor,
     result_success: bool,
     result_reason: str,
-    *,
-    alert_sink: AlertSink | None,
-) -> Action:
-    """Run the state machine for one Monitor after a Check, persist, and alert.
+) -> list[AlertIntent]:
+    """Run the state machine for one Monitor after a Check and persist.
 
-    Returns the action taken (for logging). Never raises — a failure here is
-    logged and swallowed so the engine keeps running.
+    Returns the Alert intents to deliver *after the caller commits* (#41): this
+    function no longer sends anything itself, so the per-monitor advisory lock it
+    holds is released at COMMIT before any Telegram round-trip — the lock never
+    spans network I/O. The engine commits, then calls :func:`deliver_alerts`.
+    Never raises — a failure here is logged and swallowed so the engine keeps
+    running.
     """
+    intents: list[AlertIntent] = []
     th = _thresholds_for(monitor)
     # Serialize concurrent transitions for one Monitor (#32). With the 30s
     # interval floor and timeouts up to 60s, two Checks for the same Monitor can
@@ -131,14 +134,12 @@ async def apply_transition(
 
     action = transition.action
 
-    # Persist Incident transitions + emit alerts.
+    # Persist Incident transitions and collect the intents to deliver post-commit.
     if action is Action.OPEN_INCIDENT:
         incident = Incident(monitor_id=monitor.id, open_reason=result_reason)
         session.add(incident)
         await session.flush()
-        await _maybe_alert(
-            alert_sink, AlertIntent(monitor.id, action, incident.id, result_reason), monitor
-        )
+        intents.append(AlertIntent(monitor.id, action, incident.id, result_reason))
     elif action is Action.CLOSE_INCIDENT:
         # Close the most recent open Incident for this monitor.
         open_incident = await _latest_open_incident(session, monitor.id)
@@ -156,21 +157,13 @@ async def apply_transition(
                 session, monitor.id, open_incident.opened_at, open_incident.closed_at
             )
             await session.flush()
-            await _maybe_alert(
-                alert_sink,
-                AlertIntent(monitor.id, action, open_incident.id, result_reason),
-                monitor,
-            )
+            intents.append(AlertIntent(monitor.id, action, open_incident.id, result_reason))
     elif action is Action.FLAP_START:
-        await _maybe_alert(
-            alert_sink, AlertIntent(monitor.id, action, None, "flapping detected"), monitor
-        )
+        intents.append(AlertIntent(monitor.id, action, None, "flapping detected"))
     elif action is Action.FLAP_END:
-        await _maybe_alert(
-            alert_sink, AlertIntent(monitor.id, action, None, "flapping resolved"), monitor
-        )
+        intents.append(AlertIntent(monitor.id, action, None, "flapping resolved"))
 
-    return action
+    return intents
 
 
 async def _latest_open_incident(session: AsyncSession, monitor_id: int) -> Incident | None:
@@ -201,15 +194,30 @@ async def _count_failed_checks(
     return int((await session.execute(stmt)).scalar_one())
 
 
-async def _maybe_alert(sink: AlertSink | None, intent: AlertIntent, monitor: Monitor) -> None:
-    if sink is None:
+async def deliver_alerts(
+    sink: AlertSink | None,
+    intents: list[AlertIntent],
+    *,
+    muted: bool,
+) -> None:
+    """Deliver Alert intents AFTER the transaction has committed (#41).
+
+    Kept out of :func:`apply_transition` so the per-monitor advisory lock is not
+    held across the Telegram round-trip, and so the sink (which opens its own
+    session) reads the committed Incident state rather than an uncommitted flush.
+    Mute is a delivery-layer concern: a muted Monitor still opened/closed its
+    Incident (already persisted); mute suppresses only the send. A sink failure
+    is logged, never raised.
+    """
+    if sink is None or muted:
+        for intent in intents:
+            if muted:
+                log.info("monitor %s is muted; suppressing alert %s", intent.monitor_id, intent.action)
         return
-    # Mute is a delivery-layer concern: a muted Monitor still opens/closes
-    # Incidents (already persisted above); mute suppresses only the Alert send.
-    if monitor.muted:
-        log.info("monitor %s is muted; suppressing alert %s", monitor.id, intent.action)
-        return
-    try:
-        await sink(intent)
-    except Exception:
-        log.exception("alert sink failed for monitor %s action %s", monitor.id, intent.action)
+    for intent in intents:
+        try:
+            await sink(intent)
+        except Exception:
+            log.exception(
+                "alert sink failed for monitor %s action %s", intent.monitor_id, intent.action
+            )
