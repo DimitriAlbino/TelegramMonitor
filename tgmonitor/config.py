@@ -42,12 +42,14 @@ class Settings(BaseSettings):
     telegram_login_bot_name: str = Field(default="")
     telegram_login_provider_token: str = Field(default="")
 
-    # --- Email (unused by T1) ---
+    # --- Email (SMTP for signup verification + password reset) ---
     smtp_host: str = Field(default="")
     smtp_port: int = Field(default=587)
     smtp_username: str = Field(default="")
     smtp_password: str = Field(default="")
     smtp_from: str = Field(default="noreply@monitor.example.com")
+    # Friendly sender name shown in the recipient's inbox (e.g. "TelegramMonitor").
+    smtp_from_name: str = Field(default="TelegramMonitor")
 
     # --- Engine knobs (ADR-0004, defaults from .env.example) ---
     check_tick_interval_s: float = Field(default=5.0)
