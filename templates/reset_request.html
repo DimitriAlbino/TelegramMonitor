@@ -3,8 +3,6 @@
 {% block content %}
 <div class="card auth-card">
   <h1>Reset password</h1>
-  {% if success %}<div class="flash flash-success">{{ success }}</div>{% endif %}
-  {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
   <form method="post" action="/ui/reset/request">
     <div class="form-group">
       <label for="email">Email</label>

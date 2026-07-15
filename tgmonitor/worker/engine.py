@@ -59,6 +59,7 @@ class ClaimedMonitor:
     body_contains: str | None
     max_latency_ms: int | None
     timeout_s: float
+    follow_redirects: bool
     tcp_timeout_s: float
 
     def to_check_config(self) -> CheckConfig:
@@ -70,6 +71,7 @@ class ClaimedMonitor:
             body_contains=self.body_contains,
             max_latency_ms=self.max_latency_ms,
             timeout_s=self.timeout_s,
+            follow_redirects=self.follow_redirects,
             tcp_timeout_s=self.tcp_timeout_s,
         )
 
@@ -96,6 +98,7 @@ CLAIM_DUE_SQL = text(
               config->>'body_contains'              AS body_contains,
               NULLIF(config->>'max_latency_ms','')::int AS max_latency_ms,
               COALESCE(NULLIF(config->>'timeout_s','')::float, 10.0) AS timeout_s,
+              COALESCE((config->>'follow_redirects')::bool, false) AS follow_redirects,
               COALESCE(NULLIF(config->>'tcp_timeout_s','')::float,
                        NULLIF(config->>'timeout_s','')::float, 5.0) AS tcp_timeout_s
     """
@@ -121,6 +124,7 @@ async def claim_due_monitors(session: AsyncSession, batch_limit: int) -> list[Cl
             body_contains=r.body_contains,
             max_latency_ms=r.max_latency_ms,
             timeout_s=r.timeout_s if r.timeout_s is not None else 10.0,
+            follow_redirects=r.follow_redirects if r.follow_redirects is not None else False,
             tcp_timeout_s=r.tcp_timeout_s if r.tcp_timeout_s is not None else 5.0,
         )
         for r in rows

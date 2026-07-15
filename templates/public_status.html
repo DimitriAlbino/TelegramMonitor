@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="60">
+  <title>{{ title }} — Status</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+  <script>
+    (function() {
+      var t = localStorage.getItem('theme');
+      if (!t) t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+</head>
+<body>
+  <nav class="nav">
+    <span class="nav-brand">📡 {{ title }}</span>
+    <span class="nav-spacer"></span>
+    <div class="nav-right">
+      <button class="theme-toggle" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';localStorage.setItem('theme',document.documentElement.dataset.theme)" title="Toggle theme">
+        <span class="icon-moon">🌙</span>
+        <span class="icon-sun">☀️</span>
+      </button>
+    </div>
+  </nav>
+
+  <main class="container container-wide">
+    {% if subtitle %}<p class="text-dim mb-1">{{ subtitle }}</p>{% endif %}
+
+    {% set down_count = monitors|selectattr('state','equalto','down')|list|length %}
+    {% set total = monitors|length %}
+    {% if total == 0 %}
+      <div class="summary-banner summary-all-ok">📭 No monitors published yet</div>
+    {% elif down_count == 0 %}
+      <div class="summary-banner summary-all-ok">✅ All systems operational</div>
+    {% elif down_count < total %}
+      <div class="summary-banner summary-some-down">⚠️ {{ down_count }} of {{ total }} services are down</div>
+    {% else %}
+      <div class="summary-banner summary-all-down">🔴 All services are down</div>
+    {% endif %}
+
+    <div class="status-grid">
+      {% for m in monitors %}
+      <div class="card">
+        <div class="status-monitor-header">
+          <span class="badge badge-{{ m.state }}">{{ m.state }}</span>
+          <strong>{{ m.name }}</strong>
+        </div>
+        <div class="status-monitor-meta">
+          <span class="text-dim text-sm">{{ m.reason }}</span>
+          {% if m.latency_ms != None %}
+            <span class="text-dim text-sm">· {{ m.latency_ms }}ms</span>
+          {% endif %}
+          {% if m.checked_at %}
+            <span class="text-dim text-sm">· checked {{ m.checked_at[:16].replace('T',' ') }}</span>
+          {% endif %}
+        </div>
+        {% if m.incidents %}
+        <details class="mt-1">
+          <summary class="text-dim text-sm">Recent incidents ({{ m.incidents|length }})</summary>
+          <div class="table-wrap mt-1">
+          <table>
+            <thead><tr><th>Opened</th><th>Closed</th><th>Reason</th></tr></thead>
+            <tbody>
+            {% for inc in m.incidents %}
+              <tr>
+                <td class="text-dim text-mono">{{ inc.opened_at[:16].replace('T',' ') if inc.opened_at else '—' }}</td>
+                <td class="text-dim text-mono">
+                  {% if inc.closed_at %}
+                    {{ inc.closed_at[:16].replace('T',' ') }}
+                  {% else %}
+                    — ongoing —
+                  {% endif %}
+                </td>
+                <td>{{ inc.open_reason }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+          </div>
+        </details>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    <p class="text-dim text-sm mt-2" style="text-align:center">
+      Auto-refreshes every 60s · Powered by <a href="/">TelegramMonitor</a>
+    </p>
+  </main>
+</body>
+</html>

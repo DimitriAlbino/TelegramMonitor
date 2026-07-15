@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Monitors — TelegramMonitor{% endblock %}
 {% block content %}
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem">
+<div class="page-header">
   <h1>Your Monitors</h1>
   <a href="/ui/monitors/new" class="btn">+ New Monitor</a>
 </div>
@@ -12,7 +12,8 @@
   <p class="mt-1"><a href="/ui/monitors/new">Create your first monitor →</a></p>
 </div>
 {% else %}
-<div class="card" style="padding:0">
+<div class="card card-tight">
+  <div class="table-wrap">
   <table>
     <thead><tr><th>Name</th><th>Kind</th><th>Target</th><th>State</th><th>Latency</th><th>Last reason</th><th>Actions</th></tr></thead>
     <tbody>
@@ -21,27 +22,28 @@
       {% set l = row.latest %}
       <tr>
         <td><a href="/ui/monitors/{{ m.id }}"><strong>{{ m.name }}</strong></a></td>
-        <td>{{ m.check_kind }}</td>
-        <td class="text-dim">{{ m.target[:40] }}</td>
+        <td><span class="text-sm">{{ m.check_kind }}</span></td>
+        <td class="text-dim text-mono">{{ m.target[:40] }}</td>
         <td><span class="badge badge-{{ row.badge }}">{{ row.badge }}</span></td>
-        <td>{{ l.latency_ms ~ 'ms' if l and l.latency_ms != None else '—' }}</td>
+        <td class="nowrap">{{ l.latency_ms ~ 'ms' if l and l.latency_ms != None else '—' }}</td>
         <td class="text-dim">{{ l.reason[:40] if l else 'no data yet' }}</td>
         <td>
           <div class="actions">
             {% if m.paused %}
-              <form method="post" action="/ui/monitors/{{ m.id }}/resume"><button class="btn-sm">Resume</button></form>
+              <form method="post" action="/ui/monitors/{{ m.id }}/resume"><button class="btn-sm btn-ghost">Resume</button></form>
             {% else %}
-              <form method="post" action="/ui/monitors/{{ m.id }}/pause"><button class="btn-sm">Pause</button></form>
+              <form method="post" action="/ui/monitors/{{ m.id }}/pause"><button class="btn-sm btn-ghost">Pause</button></form>
             {% endif %}
             <form method="post" action="/ui/monitors/{{ m.id }}/delete"
-                  onsubmit="return confirm('Delete {{ m.name }}?')"><button class="btn-sm btn-danger">Del</button></form>
+                  onsubmit="return confirm('Delete {{ m.name }}?')"><button class="btn-sm btn-danger">Delete</button></form>
           </div>
         </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
-<p class="text-dim mt-2">{{ rows|length }} / {{ cap }} monitors used</p>
+<p class="text-dim text-sm mt-2">{{ rows|length }} / {{ cap }} monitors used</p>
 {% endif %}
 {% endblock %}

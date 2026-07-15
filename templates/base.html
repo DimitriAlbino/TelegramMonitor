@@ -5,20 +5,37 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}TelegramMonitor{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+  <!-- No-FOUC: set theme before first paint -->
+  <script>
+    (function() {
+      var t = localStorage.getItem('theme');
+      if (!t) t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
 </head>
 <body>
   <nav class="nav">
     <a href="/" class="nav-brand">📡 TelegramMonitor</a>
     {% if current_user %}
-      <a href="/ui/monitors">Monitors</a>
-      <a href="/ui/status-page">Status Page</a>
-      <a href="/ui/settings">Settings</a>
-      <span class="nav-spacer"></span>
-      <span class="nav-user">{{ current_user.email }}</span>
-      <form method="post" action="/ui/logout" class="inline">
-        <button type="submit" class="btn-link">Log out</button>
-      </form>
+      <a href="/ui/monitors" class="nav-link">Monitors</a>
+      <a href="/ui/status-page" class="nav-link">Status Page</a>
+      <a href="/ui/settings" class="nav-link">Settings</a>
     {% endif %}
+    <span class="nav-spacer"></span>
+    <div class="nav-right">
+      <button class="theme-toggle" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';localStorage.setItem('theme',document.documentElement.dataset.theme)" title="Toggle theme">
+        <span class="icon-moon">🌙</span>
+        <span class="icon-sun">☀️</span>
+      </button>
+      {% if current_user %}
+        <span class="nav-user">{{ current_user.email }}</span>
+        <form method="post" action="/ui/logout" class="inline">
+          <button type="submit" class="btn-link">Log out</button>
+        </form>
+      {% endif %}
+    </div>
   </nav>
 
   <main class="container">
@@ -26,5 +43,7 @@
     {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
     {% block content %}{% endblock %}
   </main>
+
+  {% block scripts %}{% endblock %}
 </body>
 </html>
