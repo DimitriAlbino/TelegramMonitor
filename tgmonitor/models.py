@@ -81,7 +81,7 @@ class Monitor(Base):
     - ``paused`` (web-UI-settable): the engine stops running Checks.
     - ``muted``  (Telegram-settable): suppresses Alert delivery only.
 
-    ``check_kind`` is the Check Kind (CONTEXT.md): "http" or "tcp". The
+    ``check_kind`` is the Check Kind (CONTEXT.md): "http", "tcp", or "api_content". The
     kind-specific config (expected status, keyword, max latency, host/port,
     timeout) lives in the JSONB ``config`` column so adding a kind is additive.
     """
