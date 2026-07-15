@@ -21,7 +21,7 @@ def _build_link(path: str, token: str) -> str:
 
 
 def send_verification_email(to_email: str, token: str) -> None:
-    link = _build_link("/auth/verify", token)
+    link = _build_link("/ui/verify", token)
     body = (
         "Welcome to TelegramMonitor.\n\n"
         "Verify your email by visiting this link:\n"
@@ -32,7 +32,7 @@ def send_verification_email(to_email: str, token: str) -> None:
 
 
 def send_reset_email(to_email: str, token: str) -> None:
-    link = _build_link("/auth/reset", token)
+    link = _build_link("/ui/reset", token)
     body = (
         "Reset your TelegramMonitor password by visiting this link:\n"
         f"{link}\n\n"
