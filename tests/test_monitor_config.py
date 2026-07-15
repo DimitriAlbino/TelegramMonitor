@@ -74,8 +74,12 @@ def test_round_trip_name_only_edit_leaves_behavior_unchanged() -> None:
         json_keyword="down",
         existing=existing,
     )
-    assert cfg == {"json_field_path": "data.status", "json_keyword": "down", "timeout_s": 10.0,
-                    "tcp_timeout_s": 10.0}
+    assert cfg == {
+        "json_field_path": "data.status",
+        "json_keyword": "down",
+        "timeout_s": 10.0,
+        "tcp_timeout_s": 10.0,
+    }
 
 
 def test_create_builds_from_scratch() -> None:

@@ -44,7 +44,7 @@ class HttpTransport:
         # SSRF guard (#22): refuse internal targets. The request hook below
         # re-checks redirect targets; this pre-check covers the initial URL and
         # gives a clean failure for blocked literals before opening a client.
-        from tgmonitor.executors.ssrf import DestinationBlocked, assert_safe_destination
+        from tgmonitor.executors.ssrf import assert_safe_destination
 
         assert_safe_destination(url)
         client = self._client or httpx.AsyncClient(

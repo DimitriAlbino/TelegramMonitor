@@ -54,6 +54,12 @@ class User(Base):
     # stale links: a verification/reset is single-use.
     verify_token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reset_token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Session-revocation version (#30). Embedded in each session JWT; the auth
+    # dependencies compare the token's version to this column. Bumping it (on
+    # logout / password change / password reset) invalidates every previously
+    # issued session for this User, so a stolen 14-day token cannot survive an
+    # account recovery.
+    session_version: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     # Per-User quiet hours (ADR-0005): "HH:MM" start/end in the user's local
     # time, or NULL if disabled. Non-critical Alerts during the window are
     # deferred into a digest at window end; critical Monitors bypass.

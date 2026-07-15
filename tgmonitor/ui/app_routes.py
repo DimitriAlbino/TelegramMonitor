@@ -575,6 +575,8 @@ async def change_password(
             },
         )
     owner.password_hash = hash_password(new_password)
+    # Invalidate other sessions (#30): a password change revokes existing tokens.
+    owner.session_version += 1
     await session.commit()
     return _render(
         request,

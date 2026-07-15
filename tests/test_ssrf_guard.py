@@ -95,9 +95,7 @@ def test_hostname_with_mixed_records_blocked_if_any_internal() -> None:
 def test_tcp_host_port_target_blocked() -> None:
     """A tcp target host:port resolving to internal must be refused."""
     with pytest.raises(DestinationBlocked):
-        assert_safe_destination(
-            "169.254.169.254:80", resolver=lambda h: [], is_host_port=True
-        )
+        assert_safe_destination("169.254.169.254:80", resolver=lambda h: [], is_host_port=True)
 
 
 def test_resolver_default_uses_real_dns_for_public() -> None:

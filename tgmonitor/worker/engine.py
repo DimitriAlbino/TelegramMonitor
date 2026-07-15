@@ -189,7 +189,8 @@ class CheckEngine:
             # monitors that don't want redirects. Setting it only per-request
             # is unreliable when connections are pooled and reused (httpx may
             # return a cached redirect response from the pool).
-            "http": transport or HttpTransport(httpx.AsyncClient(timeout=30.0, follow_redirects=True)),
+            "http": transport
+            or HttpTransport(httpx.AsyncClient(timeout=30.0, follow_redirects=True)),
             "tcp": TcpTransport(),
         }
         if transports:
