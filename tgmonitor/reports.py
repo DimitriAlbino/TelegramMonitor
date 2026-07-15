@@ -11,8 +11,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from html import escape
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,25 +34,67 @@ def _esc(text: str) -> str:
     return escape(text, quote=True)
 
 
+def next_run_for_delivery_time(
+    delivery_time: str,
+    timezone: str | None,
+    *,
+    cadence_days: int,
+    now: datetime | None = None,
+) -> datetime:
+    """Compute the next run_at for a scheduled Report (#31).
+
+    The report must fire at ``delivery_time`` in ``timezone`` (not at
+    ``now + cadence``, which drifted later each tick). This finds the next
+    wall-clock occurrence of ``delivery_time`` strictly after ``now``; if that
+    occurrence is in the past relative to the cadence (already passed today),
+    it advances by the cadence until it is in the future.
+
+    Malformed ``delivery_time`` or an unknown timezone degrade gracefully to
+    ``now + cadence`` so a bad value never blocks all reports.
+    """
+    base = now if now is not None else datetime.now(UTC)
+    try:
+        hh, mm = delivery_time.split(":")
+        t = time(int(hh), int(mm))
+    except (ValueError, AttributeError):
+        return base + timedelta(days=cadence_days)
+    try:
+        tz = ZoneInfo(timezone) if timezone else UTC
+    except (KeyError, ValueError):
+        tz = UTC
+    # Build today's occurrence in the configured tz, then convert to UTC.
+    today_local = base.astimezone(tz)
+    candidate = today_local.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+    if candidate <= base:
+        candidate += timedelta(days=1)
+    return candidate.astimezone(UTC)
+
+
 def _advance_next_run(cadence: str, now: datetime) -> datetime:
     delta = timedelta(days=PERIOD_DAYS.get(cadence, 1))
     return now + delta
 
 
-async def render_scheduled_report(session: AsyncSession, user_id: int, cadence: str) -> str:
-    """Render a periodical digest for the user's monitors over the cadence window."""
+async def render_scheduled_report(
+    session: AsyncSession,
+    user_id: int,
+    cadence: str,
+    *,
+    monitor_id: int | None = None,
+) -> str:
+    """Render a periodical digest for the user's monitors over the cadence window.
+
+    ``monitor_id`` scopes the report to one Monitor; NULL (default) covers all
+    the user's monitors (#31).
+    """
     days = PERIOD_DAYS.get(cadence, 1)
     since = datetime.now(UTC) - timedelta(days=days)
 
-    monitors = (
-        (
-            await session.execute(
-                select(Monitor).where(Monitor.user_id == user_id).order_by(Monitor.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    stmt = select(Monitor).where(Monitor.user_id == user_id)
+    if monitor_id is not None:
+        stmt = stmt.where(Monitor.id == monitor_id)
+    stmt = stmt.order_by(Monitor.id)
+    monitors = (await session.execute(stmt)).scalars().all()
 
     if not monitors:
         return f"<b>{cadence.title()} report</b>\nYou have no monitors."
@@ -147,7 +190,7 @@ CLAIM_DUE_REPORTS_SQL = text(
            SELECT id FROM reports WHERE next_run_at <= now()
            ORDER BY next_run_at LIMIT :limit FOR UPDATE SKIP LOCKED
        )
-    RETURNING id, user_id, cadence
+    RETURNING id, user_id, cadence, monitor_id, delivery_time, timezone
     """
 )
 
@@ -161,6 +204,11 @@ async def run_report_tick(
 
     Returns the number of reports dispatched. Called from the worker's tick loop
     (or its own cadence). Never raises — a failure is logged.
+
+    The claim SQL advances next_run_at by the cadence interval so the row is not
+    re-claimed every tick; a follow-up correction re-aligns it to the configured
+    delivery_time/timezone so reports land at the user's chosen wall-clock time
+    rather than drifting later each tick (#31).
     """
     from tgmonitor.db import session_factory as sf
 
@@ -177,10 +225,19 @@ async def run_report_tick(
                 report = await session.get(Report, r.id)
                 if report is None:
                     continue
-                body = await render_scheduled_report(session, r.user_id, r.cadence)
+                body = await render_scheduled_report(
+                    session, r.user_id, r.cadence, monitor_id=r.monitor_id
+                )
                 report.last_body = body
                 report.last_rendered_at = datetime.now(UTC)
                 report.last_run_at = datetime.now(UTC)
+                # Re-align next_run_at to the configured delivery_time/timezone
+                # (#31): the claim SQL advanced by an interval to release the
+                # row; correct it so the next fire is at the user's chosen time.
+                cadence_days = PERIOD_DAYS.get(r.cadence, 1)
+                report.next_run_at = next_run_for_delivery_time(
+                    r.delivery_time, r.timezone, cadence_days=cadence_days
+                )
                 # Resolve the user's chat and deliver.
                 user = await session.get(User, r.user_id)
                 await session.commit()

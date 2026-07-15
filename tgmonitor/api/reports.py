@@ -7,7 +7,6 @@ and delivers it.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -17,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tgmonitor.auth.dependencies import ActiveUser
 from tgmonitor.db import get_session
+from tgmonitor.models import Monitor
 from tgmonitor.report_model import Report
+from tgmonitor.reports import PERIOD_DAYS, next_run_for_delivery_time
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -40,21 +41,27 @@ class ReportOut(BaseModel):
     next_run_at: str
 
 
-def _cadence_delta(cadence: str) -> timedelta:
-    return {"daily": timedelta(days=1), "weekly": timedelta(days=7), "monthly": timedelta(days=30)}[
-        cadence
-    ]
-
-
 @router.post("", response_model=ReportOut, status_code=status.HTTP_201_CREATED)
 async def create_report(body: ReportCreate, user: ActiveUser, session: SessionDep) -> ReportOut:
+    # Validate monitor_id ownership at creation (#31): a Report must not be
+    # scoped to another tenant's monitor.
+    if body.monitor_id is not None:
+        owned = await session.scalar(
+            select(Monitor.id).where(Monitor.id == body.monitor_id, Monitor.user_id == user.id)
+        )
+        if owned is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "monitor not found")
+    cadence_days = PERIOD_DAYS.get(body.cadence, 1)
     report = Report(
         user_id=user.id,
         monitor_id=body.monitor_id,
         cadence=body.cadence,
         delivery_time=body.delivery_time,
         timezone=body.timezone,
-        next_run_at=datetime.now(UTC) + _cadence_delta(body.cadence),
+        # Schedule at the configured delivery_time/timezone, not now+cadence (#31).
+        next_run_at=next_run_for_delivery_time(
+            body.delivery_time, body.timezone, cadence_days=cadence_days
+        ),
     )
     session.add(report)
     await session.commit()
