@@ -24,6 +24,7 @@ from tgmonitor.api.statuspage import public_router as statuspage_public_router
 from tgmonitor.auth.dependencies import ActiveUser
 from tgmonitor.auth.routes import router as auth_router
 from tgmonitor.auth.tokens import decode_token
+from tgmonitor.config import get_settings
 from tgmonitor.db import dispose_engine, get_engine, get_session
 from tgmonitor.models import Check, Monitor, User
 from tgmonitor.telegram.webhook import router as telegram_router
@@ -68,6 +69,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    # Refuse to start in production with default secrets (#25).
+    from tgmonitor.config import validate_production_secrets
+
+    validate_production_secrets(get_settings())
     app = FastAPI(
         title="TelegramMonitor",
         description="Hosted monitoring service with Telegram alerts.",

@@ -78,6 +78,10 @@ def main() -> None:
     _configure_logging()
     log = logging.getLogger("tgmonitor.worker")
     log.info("worker starting")
+    # Refuse to start in production with default secrets (#25).
+    from tgmonitor.config import validate_production_secrets
+
+    validate_production_secrets(get_settings())
     _wait_for_db()
     _apply_migrations()
     log.info("migrations applied; entering tick loop")

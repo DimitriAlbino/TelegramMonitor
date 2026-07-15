@@ -119,6 +119,35 @@ class Settings(BaseSettings):
         return self.database_url
 
 
+# Sentinel default values that must never reach a production deploy (#25).
+DEFAULT_SECRET_KEY = "change-me-to-a-long-random-string"
+DEFAULT_POSTGRES_PASSWORD = "change-me"
+
+
+def validate_production_secrets(settings: Settings) -> None:
+    """Fail fast if security-critical secrets are still default in production (#25).
+
+    ``secret_key`` keys the stateless HS256 session JWTs: a deploy that forgets
+    to set it lets anyone forge a session for any user id. ``POSTGRES_PASSWORD``
+    similarly defaults to ``change-me``. When ``ENVIRONMENT=production``, leaving
+    either at its placeholder default (or blank) is a hard startup error. Non-
+    production environments still boot with defaults for convenience.
+    """
+    if settings.environment != "production":
+        return
+    problems: list[str] = []
+    if not settings.secret_key or settings.secret_key == DEFAULT_SECRET_KEY:
+        problems.append("SECRET_KEY is unset or still the placeholder default")
+    if settings.postgres_password == DEFAULT_POSTGRES_PASSWORD:
+        problems.append("POSTGRES_PASSWORD is still the placeholder default")
+    if problems:
+        raise RuntimeError(
+            "Refusing to start in production with insecure defaults: "
+            + "; ".join(problems)
+            + ". Set real values in the environment / .env."
+        )
+
+
 @lru_cache
 def get_settings() -> Settings:
     """Cached settings singleton — import once, read everywhere."""
