@@ -51,7 +51,11 @@ def _send(to_email: str, subject: str, body: str) -> None:
         return
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = settings.smtp_from
+    msg["From"] = (
+        f"{settings.smtp_from_name} <{settings.smtp_from}>"
+        if settings.smtp_from_name
+        else settings.smtp_from
+    )
     msg["To"] = to_email
     msg.set_content(body)
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
