@@ -77,6 +77,11 @@ class Thresholds:
     flap_window_s: float = 600.0  # 10 minutes
     # Stabilization: this many consecutive successes exits flapping.
     flap_stabilization: int = 5
+    # Hard-down exit from flapping (#27): this many consecutive failures while
+    # flapping transitions to a real down Incident. Without it, a flapping
+    # monitor that then goes permanently down never pages again — flapping
+    # becomes a permanent silence trap.
+    flap_hard_down: int = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,9 +133,18 @@ def step(
                 s.recent_opens = []
                 return Transition(s, Action.FLAP_END, "flapping resolved")
         else:
-            # A failure during flapping resets stabilization progress but does
-            # not open a new Incident (suppressed).
+            # A failure during flapping resets stabilization progress. It also
+            # accrues toward a hard-down exit (#27): a flapping monitor that
+            # keeps failing for flap_hard_down checks is actually down and must
+            # page, otherwise flapping is a permanent silence trap.
             s.consecutive_successes = 0
+            s.consecutive_failures += 1
+            if s.consecutive_failures >= thresholds.flap_hard_down:
+                s.status = "down"
+                s.consecutive_failures = 0
+                return Transition(
+                    s, Action.OPEN_INCIDENT, result.reason or "flapping escalated to down"
+                )
         return Transition(s, Action.NONE)
 
     # --- Not flapping: normal debounce logic ---
