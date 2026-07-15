@@ -112,3 +112,20 @@ async def test_dispatcher_runs_api_content_kind() -> None:
 
 def test_fake_transport_satisfies_protocol() -> None:
     assert isinstance(FakeTransport(), Transport)
+
+
+async def test_classifier_does_not_leak_field_value() -> None:
+    """The reason must not echo fetched response data (#22).
+
+    Up to 80 chars of any field were written into Check.reason and shown to the
+    user, turning blind SSRF into data exfiltration. The reason now reports
+    only the configured path + keyword, never the value.
+    """
+    body = '{"secret": "AKIAIOSFODNN7EXAMPLE"}'
+    transport: Transport = FakeTransport(responses={"https://api.example.com/status": (200, body)})
+    result = await run_api_content_check(
+        api_content_config(json_field_path="secret", json_keyword="AKIA"), transport
+    )
+    assert result.success is False
+    assert "AKIAIOSFODNN7EXAMPLE" not in result.reason  # value not echoed
+    assert "AKIA" in result.reason  # configured keyword still present

@@ -126,3 +126,13 @@ async def test_dispatcher_rejects_unknown_kind_with_failing_result() -> None:
 def test_fake_transport_satisfies_transport_protocol() -> None:
     """Structural check: the fake quacks like a Transport."""
     assert isinstance(FakeTransport(), Transport)
+
+
+async def test_internal_target_refused() -> None:
+    """An SSRF-internal HTTP target is refused before any request (#22)."""
+    transport: Transport = FakeTransport(responses={"http://169.254.169.254/": (200, "x")})
+    result = await run_http_check(http_config("http://169.254.169.254/"), transport)
+    assert result.success is False
+    assert "blocked" in result.reason
+    # The transport must never have been called for a blocked target.
+    assert transport.requested == []
