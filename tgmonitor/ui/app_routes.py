@@ -597,6 +597,20 @@ async def set_quiet_hours(
     if owner is None:
         raise HTTPException(status_code=404, detail="user not found")
     if quiet_hours_enabled and quiet_hours_start and quiet_hours_end:
+        # Validate strict HH:MM (#20): a malformed value like ``9:00`` made the
+        # window silently never match while the UI reported success.
+        from tgmonitor.telegram.quiet_hours import is_valid_hhmm
+
+        if not is_valid_hhmm(quiet_hours_start) or not is_valid_hhmm(quiet_hours_end):
+            return _render(
+                request,
+                "settings.html",
+                {
+                    "owner": owner,
+                    "error": "Quiet-hours times must be HH:MM (e.g. 22:00, 07:00).",
+                    "success": None,
+                },
+            )
         owner.quiet_hours_start = quiet_hours_start
         owner.quiet_hours_end = quiet_hours_end
         owner.quiet_hours_tz = quiet_hours_tz

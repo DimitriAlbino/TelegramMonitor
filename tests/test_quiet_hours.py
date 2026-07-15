@@ -87,3 +87,32 @@ def test_non_critical_not_deferred_outside_window() -> None:
         )
         is False
     )
+
+
+# --- Strict HH:MM validation (#20) ---
+
+
+def test_is_valid_hhmm_accepts_well_formed() -> None:
+    from tgmonitor.telegram.quiet_hours import is_valid_hhmm
+
+    assert is_valid_hhmm("00:00") is True
+    assert is_valid_hhmm("23:59") is True
+    assert is_valid_hhmm("09:30") is True
+
+
+def test_is_valid_hhmm_rejects_unpadded() -> None:
+    """``9:00`` must be rejected, not silently stored (#20)."""
+    from tgmonitor.telegram.quiet_hours import is_valid_hhmm
+
+    assert is_valid_hhmm("9:00") is False
+    assert is_valid_hhmm("09:3") is False
+
+
+def test_is_valid_hhmm_rejects_garbage_and_out_of_range() -> None:
+    from tgmonitor.telegram.quiet_hours import is_valid_hhmm
+
+    assert is_valid_hhmm("24:00") is False
+    assert is_valid_hhmm("12:60") is False
+    assert is_valid_hhmm("abcde") is False
+    assert is_valid_hhmm("") is False
+    assert is_valid_hhmm(None) is False

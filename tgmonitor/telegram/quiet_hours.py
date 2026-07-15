@@ -17,7 +17,14 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 
-def _parse_hhmm(s: str | None) -> time | None:
+def parse_hhmm(s: str | None) -> time | None:
+    """Parse a strict ``HH:MM`` string to :class:`time`, or None if malformed.
+
+    Public so the UI/API layer can validate user input and reject it visibly
+    rather than silently storing a value the window matcher will never match
+    (#20) — e.g. ``9:00`` (not zero-padded) made the window silently inactive
+    while the UI reported success.
+    """
     if not s or len(s) != 5 or s[2] != ":":
         return None
     try:
@@ -27,6 +34,15 @@ def _parse_hhmm(s: str | None) -> time | None:
     if not (0 <= hh <= 23 and 0 <= mm <= 59):
         return None
     return time(hh, mm)
+
+
+def is_valid_hhmm(s: str | None) -> bool:
+    """True if ``s`` is a well-formed ``HH:MM`` in range."""
+    return parse_hhmm(s) is not None
+
+
+# Kept as the internal alias the matcher already uses.
+_parse_hhmm = parse_hhmm
 
 
 def is_in_quiet_window(
