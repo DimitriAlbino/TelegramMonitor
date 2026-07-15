@@ -291,6 +291,15 @@ class CheckEngine:
                 await run_report_tick(None)
             except Exception:
                 log.exception("report tick failed")
+            # Flush quiet-hours deferred digests (#20): deliver non-critical
+            # alerts queued during a quiet window once the window ends. Without
+            # this the queue grows unbounded and alerts are lost forever.
+            try:
+                from tgmonitor.telegram.alerting import flush_due_digests
+
+                await flush_due_digests()
+            except Exception:
+                log.exception("quiet-hours digest flush failed")
             await asyncio.sleep(self.settings.check_tick_interval_s)
 
         # Graceful shutdown: let in-flight checks finish before exiting.
