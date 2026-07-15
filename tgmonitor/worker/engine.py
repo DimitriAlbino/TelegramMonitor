@@ -184,7 +184,12 @@ class CheckEngine:
         from tgmonitor.executors.tcp import TcpTransport
 
         self._transports: dict[str, Transport] = {
-            "http": transport or HttpTransport(httpx.AsyncClient(timeout=30.0)),
+            # follow_redirects=True at the client level is the reliable default;
+            # per-request follow_redirects=False correctly overrides it for
+            # monitors that don't want redirects. Setting it only per-request
+            # is unreliable when connections are pooled and reused (httpx may
+            # return a cached redirect response from the pool).
+            "http": transport or HttpTransport(httpx.AsyncClient(timeout=30.0, follow_redirects=True)),
             "tcp": TcpTransport(),
         }
         if transports:
