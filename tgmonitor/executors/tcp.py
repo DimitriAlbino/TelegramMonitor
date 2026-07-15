@@ -37,7 +37,7 @@ class TcpTransport:
             raise ValueError(f"invalid host:port target: {url!r}")
         # SSRF guard (#22): refuse internal/link-loopback targets. This also
         # stops TCP being used as an internal port scanner.
-        from tgmonitor.executors.ssrf import DestinationBlocked, assert_safe_destination
+        from tgmonitor.executors.ssrf import assert_safe_destination
 
         assert_safe_destination(url, is_host_port=True)
         port = int(port_str)

@@ -8,6 +8,8 @@ discarded). These exercise the helpers + token logic without a running server.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 import tgmonitor.auth.routes as auth_routes
@@ -65,7 +67,9 @@ async def test_login_constant_time_runs_verify_for_missing_user(monkeypatch) -> 
     body = auth_routes.LoginIn(email="ghost@example.com", password="whatever")
     with pytest.raises(HTTPException) as exc:
         await auth_routes.login(
-            body, request=_DummyRequest(), session=_ScalarSession()  # type: ignore[arg-type]
+            body,
+            request=_DummyRequest(),
+            session=_ScalarSession(),  # type: ignore[arg-type]
         )
     assert exc.value.status_code == 401
     assert seen_hashes, "verify_password must run even for a missing user"
@@ -78,7 +82,7 @@ class _DummyClient:
 
 class _DummyRequest:
     client = _DummyClient()
-    headers: dict[str, str] = {}
+    headers: ClassVar[dict[str, str]] = {}
 
 
 def test_reset_limiter_result_enforced_via_source() -> None:

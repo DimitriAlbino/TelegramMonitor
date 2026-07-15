@@ -74,6 +74,12 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    # CSRF: reject cross-origin unsafe requests to the cookie-authenticated UI
+    # (#30). The Bearer-authenticated JSON API and the Telegram webhook (secret
+    # header) are exempt.
+    from tgmonitor.ui.csrf import OriginCsrfMiddleware
+
+    app.add_middleware(OriginCsrfMiddleware)
     app.include_router(auth_router)
     app.include_router(monitors_router)
     app.include_router(reports_router)

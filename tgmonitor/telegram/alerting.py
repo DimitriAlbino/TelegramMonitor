@@ -59,7 +59,7 @@ def format_alert(intent: AlertIntent, monitor_name: str) -> str | None:
 def make_alert_sink(
     channel: NotificationChannel | None = None,
     *,
-    now: "Callable[[], datetime] | None" = None,
+    now: Callable[[], datetime] | None = None,
 ) -> AlertSink:
     """Build the async alert_sink callable the CheckEngine wants.
 
@@ -164,7 +164,7 @@ async def flush_due_digests(
     channel: NotificationChannel | None = None,
     *,
     now_utc: datetime | None = None,
-    user_lookup: "UserLookup | None" = None,
+    user_lookup: UserLookup | None = None,
 ) -> int:
     """Deliver deferred (non-critical) digests whose quiet window has ended.
 

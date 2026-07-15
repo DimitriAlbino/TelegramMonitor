@@ -8,8 +8,6 @@ X-Forwarded-For header, and not be spoofable from arbitrary clients.
 
 from __future__ import annotations
 
-import pytest
-
 from tgmonitor.auth.ratelimit import client_ip_from_request
 
 

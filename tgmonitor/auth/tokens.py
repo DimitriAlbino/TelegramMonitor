@@ -47,6 +47,10 @@ class TokenPayload:
     purpose: str
     jti: str
     exp: datetime
+    # Session-revocation version (#30): the User.session_version value at issue
+    # time. The auth dependencies compare it to the current column value; a bump
+    # invalidates all previously issued sessions. Absent on legacy tokens.
+    sv: int = 0
 
 
 def _encode(payload: dict[str, object]) -> str:
@@ -54,7 +58,7 @@ def _encode(payload: dict[str, object]) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
-def create_session_token(user_id: int) -> str:
+def create_session_token(user_id: int, *, session_version: int = 0) -> str:
     settings = get_settings()
     exp = datetime.now(UTC) + timedelta(minutes=settings.session_expire_minutes)
     payload = {
@@ -62,6 +66,9 @@ def create_session_token(user_id: int) -> str:
         "purpose": "session",
         "jti": _new_jti(),
         "exp": exp,
+        # Embed the revocation version so the dependency can reject a token
+        # whose version is stale (after logout / password change / reset).
+        "sv": session_version,
     }
     return _encode(payload)
 
@@ -91,4 +98,8 @@ def decode_token(token: str, expected_purpose: str | None = None) -> TokenPayloa
         exp = datetime.fromtimestamp(float(raw["exp"]), tz=UTC)
     except (KeyError, ValueError, OSError):
         return None
-    return TokenPayload(sub=str(raw["sub"]), purpose=purpose, jti=str(raw["jti"]), exp=exp)
+    # sv is absent on tokens issued before #30; default to 0 (always valid until
+    # the first bump, after which old tokens carry sv=0 < current and are
+    # rejected by the dependency).
+    sv = int(raw.get("sv", 0))
+    return TokenPayload(sub=str(raw["sub"]), purpose=purpose, jti=str(raw["jti"]), exp=exp, sv=sv)

@@ -26,6 +26,7 @@ def _esc(text: str) -> str:
     """HTML-escape user-controlled text interpolated into parse_mode=HTML (#28)."""
     return escape(text, quote=True)
 
+
 HELP_TEXT = (
     "<b>TelegramMonitor commands</b>\n\n"
     "/status — live state of all your monitors\n"
@@ -172,8 +173,7 @@ async def cmd_incidents(session: AsyncSession, user_id: int) -> str:
         mon = await session.get(Monitor, inc.monitor_id)
         name = _esc(mon.name) if mon else f"#{inc.monitor_id}"
         lines.append(
-            f"• {state} <b>{name}</b> — {_esc(inc.open_reason)} "
-            f"({inc.opened_at:%Y-%m-%d %H:%M})"
+            f"• {state} <b>{name}</b> — {_esc(inc.open_reason)} ({inc.opened_at:%Y-%m-%d %H:%M})"
         )
     return "\n".join(lines)
 

@@ -70,6 +70,7 @@ async def test_apply_transition_takes_per_monitor_lock_first() -> None:
     failure and delaying the Incident open by an interval.
     """
     session = _FakeSession()
+
     # A monitor-like object exposing the columns apply_transition reads.
     class M:
         id = 42

@@ -27,6 +27,7 @@ from tgmonitor.auth.tokens import (
     hash_password,
     verify_password,
 )
+from tgmonitor.config import get_settings
 from tgmonitor.db import get_session
 from tgmonitor.models import User
 from tgmonitor.ui.session import COOKIE_NAME
@@ -46,12 +47,16 @@ templates.env.globals["current_user"] = None
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
+    # Secure in production (#30): the cookie must only travel over HTTPS so it
+    # cannot be sniffed on a non-TLS hop. In dev (HTTP localhost) Secure would
+    # prevent the browser from storing it, so it is gated on ENVIRONMENT.
+    secure = get_settings().environment == "production"
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,  # Caddy terminates TLS upstream; cookie travels over HTTPS to the proxy.
+        secure=secure,
         max_age=60 * 60 * 24 * 14,  # 14 days, matching session_expire_minutes
     )
 
@@ -135,7 +140,9 @@ async def login_submit(
             status_code=403,
         )
     response = RedirectResponse("/ui/monitors", status_code=302)
-    _set_session_cookie(response, create_session_token(user.id))
+    _set_session_cookie(
+        response, create_session_token(user.id, session_version=user.session_version)
+    )
     return response
 
 
@@ -233,7 +240,19 @@ async def verify_page(
 
 
 @router.post("/logout")
-async def logout(request: Request) -> RedirectResponse:
+async def logout(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RedirectResponse:
+    """Invalidate the session server-side (#30): bump session_version so the
+    cookie token is rejected even if a client keeps it."""
+    token = request.cookies.get(COOKIE_NAME)
+    payload = decode_token(token, expected_purpose="session") if token else None
+    if payload is not None:
+        user = await session.get(User, int(payload.sub))
+        if user is not None:
+            user.session_version += 1
+            await session.commit()
     response = RedirectResponse("/ui/login", status_code=302)
     _clear_session_cookie(response)
     return response
@@ -329,6 +348,8 @@ async def reset_confirm_submit(
         )
     user.password_hash = hash_password(password)
     user.reset_token_jti = None
+    # Invalidate all prior sessions (#30).
+    user.session_version += 1
     await session.commit()
     # Redirect to login with a success indicator.
     return _render(
