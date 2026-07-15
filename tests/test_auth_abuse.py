@@ -85,15 +85,34 @@ class _DummyRequest:
     headers: ClassVar[dict[str, str]] = {}
 
 
-def test_reset_limiter_result_enforced_via_source() -> None:
-    """The reset handler now raises 429 (enforced) rather than discarding (#29).
+async def test_reset_request_over_limit_raises_429(monkeypatch) -> None:
+    """When the IP limiter rejects, request_reset raises 429 (enforced, #29).
 
-    Asserted structurally: request_reset calls the IP limiter's check and raises
-    on False. We confirm the function references the check result by ensuring a
-    False from the limiter surfaces as a 429 (covered by the source-level guard).
+    Behavioral: drive the real handler with a limiter that returns False and
+    assert it raises HTTP 429 and never reaches the DB — proving the limiter
+    result is honoured, not discarded.
     """
-    import inspect
+    from fastapi import HTTPException
 
-    src = inspect.getsource(auth_routes.request_reset)
-    assert "if not await get_ip_limiter().check" in src
-    assert "429" in src
+    from tgmonitor.auth.routes import ResetRequestIn
+
+    class _OverLimit:
+        async def check(self, key):
+            return False
+
+    reached_db = False
+
+    class _Session:
+        async def scalar(self, stmt):
+            nonlocal reached_db
+            reached_db = True
+            return None
+
+    monkeypatch.setattr(auth_routes, "get_ip_limiter", lambda: _OverLimit())
+
+    with pytest.raises(HTTPException) as ei:
+        await auth_routes.request_reset(
+            ResetRequestIn(email="user@example.com"), _DummyRequest(), _Session()
+        )
+    assert ei.value.status_code == 429
+    assert reached_db is False, "must short-circuit before any DB work when throttled"

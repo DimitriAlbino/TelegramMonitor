@@ -14,85 +14,101 @@ Error → Result mapping (so the engine keeps a record of why a probe failed):
 
 from __future__ import annotations
 
+import ipaddress
 import time
+from urllib.parse import urlparse
 
 import httpx
 
 from tgmonitor.executors.base import CheckConfig, Transport
 from tgmonitor.results import Result, classify_http
 
+# Cap on redirect hops we follow manually (each hop is independently re-pinned).
+MAX_REDIRECTS = 5
+
 
 class HttpTransport:
-    """The real transport: an ``httpx.AsyncClient`` GET.
+    """The real transport: an ``httpx.AsyncClient`` GET with SSRF-safe pinning.
 
     A thin adapter so :class:`CheckConfig`/``Transport`` stay backend-agnostic.
     Reuses a long-lived client for connection pooling; tests pass a fake.
 
-    The client carries a request event hook that re-validates every request's
-    destination against the SSRF blocklist (#22), including redirect targets
-    when ``follow_redirects`` is in effect — so an external URL that 302s to an
-    internal address is refused, regardless of the per-monitor redirect flag or
-    the client-level follow default.
+    Redirects are followed manually so every hop is resolved, validated, and
+    **pinned to the vetted IP** (#39): we connect to the exact address we
+    checked (Host header + TLS SNI preserved for the original hostname), which
+    closes the DNS-rebinding TOCTOU that a check-by-name guard leaves open — a
+    name can no longer answer public to the guard and internal to the client.
+    An internal target at any hop raises DestinationBlocked.
     """
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
-        # Ensure the SSRF re-validation hook is attached whether the client is
-        # injected (the pooled, long-lived client the worker engine builds) or
-        # created per-request below. Without this the redirect re-check is dead
-        # code on the production path, because the engine passes its own client
-        # and the `or httpx.AsyncClient(...)` branch is never taken (#22).
-        if client is not None:
-            _register_ssrf_hook(client)
         self._client = client
 
     async def request(
         self, url: str, *, timeout_s: float, follow_redirects: bool = False
     ) -> tuple[int, str]:
-        # SSRF guard (#22): refuse internal targets. The request hook re-checks
-        # redirect targets; this pre-check covers the initial URL and gives a
-        # clean failure for blocked literals before opening a client.
-        from tgmonitor.executors.ssrf import assert_safe_destination
-
-        assert_safe_destination(url)
-        client = self._client or httpx.AsyncClient(
-            timeout=timeout_s,
-            follow_redirects=follow_redirects,
-            event_hooks={"request": [_ssrf_request_hook]},
-        )
+        client = self._client or httpx.AsyncClient(timeout=timeout_s)
         owned = self._client is None
         try:
-            resp = await client.get(url, timeout=timeout_s, follow_redirects=follow_redirects)
+            logical = url  # hostname-based URL; redirects resolve against this
+            resp: httpx.Response | None = None
+            for _hop in range(MAX_REDIRECTS + 1):
+                pinned_url, host_header, sni = _pin_target(logical)
+                headers = {"Host": host_header} if host_header else None
+                extensions = {"sni_hostname": sni} if sni else None
+                resp = await client.get(
+                    pinned_url,
+                    timeout=timeout_s,
+                    follow_redirects=False,
+                    headers=headers,
+                    extensions=extensions,
+                )
+                location = resp.headers.get("location")
+                if not (follow_redirects and resp.is_redirect and location):
+                    break
+                logical = str(httpx.URL(logical).join(location))
+            assert resp is not None
             return resp.status_code, resp.text
         finally:
             if owned:
                 await client.aclose()
 
 
-def _register_ssrf_hook(client: httpx.AsyncClient) -> None:
-    """Attach :func:`_ssrf_request_hook` to ``client`` idempotently (#22).
+def _pin_target(url: str) -> tuple[str, str | None, str | None]:
+    """Return ``(request_url, host_header, sni_hostname)`` for an SSRF-safe GET.
 
-    Used for injected clients (the engine's pooled client) so redirect targets
-    are re-validated on the production path, not only on the per-request client.
+    Validates the destination and, for a hostname, rewrites the URL to the vetted
+    IP while returning the ``Host`` header and SNI hostname to preserve routing
+    and TLS. Raises :class:`DestinationBlocked` for an internal destination. An
+    IP literal is validated and used as-is; an unresolvable hostname is left
+    untouched (it will fail at connect).
     """
-    hooks = dict(client.event_hooks)
-    request_hooks = list(hooks.get("request", []))
-    if _ssrf_request_hook not in request_hooks:
-        request_hooks.append(_ssrf_request_hook)
-    hooks["request"] = request_hooks
-    client.event_hooks = hooks
+    from tgmonitor.executors.ssrf import DestinationBlocked, is_blocked_ip, pick_safe_ip
 
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        raise DestinationBlocked(f"could not parse host from target {url!r}")
 
-async def _ssrf_request_hook(request: httpx.Request) -> None:
-    """httpx request event hook: re-validate each destination (#22).
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if is_blocked_ip(literal):
+            raise DestinationBlocked(f"target IP {literal} is a blocked internal address")
+        return url, None, None
 
-    Fires for the initial request and for every redirect hop when redirects are
-    followed. Raises :class:`DestinationBlocked` on an internal target, which
-    httpx surfaces to the caller (the executor maps it to a failing Result via
-    the run_http_check/run_api_content_check exception handling).
-    """
-    from tgmonitor.executors.ssrf import assert_safe_destination
+    safe_ip = pick_safe_ip(host)  # raises if internal; None if unresolvable
+    if safe_ip is None:
+        return url, None, None
 
-    assert_safe_destination(str(request.url))
+    ip_netloc = f"[{safe_ip}]" if ":" in safe_ip else safe_ip
+    if parsed.port:
+        ip_netloc = f"{ip_netloc}:{parsed.port}"
+    pinned_url = parsed._replace(netloc=ip_netloc).geturl()
+    host_header = f"{host}:{parsed.port}" if parsed.port else host
+    return pinned_url, host_header, host
 
 
 async def run_http_check(config: CheckConfig, transport: Transport) -> Result:
@@ -104,7 +120,8 @@ async def run_http_check(config: CheckConfig, transport: Transport) -> Result:
     records every probe outcome, even failures.
 
     The target is checked against the SSRF blocklist (#22) before any request;
-    redirect targets are re-validated by the transport's request hook.
+    the transport additionally pins each hop to a vetted IP (#39), so an internal
+    target — direct or via redirect — surfaces as a DestinationBlocked failure.
     """
     from tgmonitor.executors.ssrf import DestinationBlocked, assert_safe_destination
 

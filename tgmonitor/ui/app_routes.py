@@ -680,7 +680,7 @@ async def set_telegram_chat_id(
     import secrets as _secrets
     from datetime import UTC, datetime, timedelta
 
-    code = _secrets.token_hex(4).upper()  # 8 hex chars, easy to type
+    code = _secrets.token_hex(8).upper()  # 16 hex chars (64 bits) — not brute-forceable (#43)
     owner.telegram_link_code = code
     owner.telegram_link_expires_at = datetime.now(UTC) + timedelta(minutes=10)
     await session.commit()

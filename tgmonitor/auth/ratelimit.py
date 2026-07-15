@@ -66,6 +66,22 @@ def get_ip_limiter() -> RateLimiter:
     return _ip_limiter
 
 
+_link_limiter: RateLimiter | None = None
+
+
+def get_link_limiter() -> RateLimiter:
+    """Throttle Telegram chat-link attempts per chat_id (#43).
+
+    A tight cap so brute-forcing an active one-time link code over Telegram is
+    impractical; a legitimate user sends the code once. Per-process, like the
+    other limiters.
+    """
+    global _link_limiter
+    if _link_limiter is None:
+        _link_limiter = RateLimiter(window_s=300, max_per_key=5)
+    return _link_limiter
+
+
 def get_email_limiter() -> RateLimiter:
     global _email_limiter
     if _email_limiter is None:

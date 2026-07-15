@@ -156,6 +156,13 @@ async def _handle_link(session: AsyncSession, chat_id: str, code: str) -> None:
         )
         return
 
+    # Throttle attempts per chat so a one-time code cannot be brute-forced (#43).
+    from tgmonitor.auth.ratelimit import get_link_limiter
+
+    if not await get_link_limiter().check(chat_id):
+        await _reply(chat_id, "Too many link attempts. Please wait a few minutes and try again.")
+        return
+
     from datetime import UTC, datetime
 
     from tgmonitor.models import User

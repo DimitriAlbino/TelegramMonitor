@@ -105,8 +105,8 @@ def make_alert_sink(
             # distinct from the recovery one-liner. Send it only after the
             # recovery Alert actually went out, and only stamp summary_sent_at
             # after a confirmed summary send (#21) — never pre-stamp. (Mute is
-            # already honoured upstream: _maybe_alert does not call the sink for
-            # a muted monitor, so we never reach here when muted.)
+            # already honoured upstream: deliver_alerts does not call the sink
+            # for a muted monitor, so we never reach here when muted.)
             if (
                 delivered
                 and intent.action is Action.CLOSE_INCIDENT
@@ -135,10 +135,53 @@ from tgmonitor.telegram.quiet_hours import is_in_quiet_window  # noqa: E402
 _digest_lock = asyncio.Lock()
 _digests: dict[int, list[str]] = {}
 
+# Telegram rejects messages longer than 4096 chars with a 400 (#40); a digest
+# joined from many deferred alerts can exceed that, so it is split into chunks.
+TELEGRAM_MAX_CHARS = 4096
+# Bound the per-user queue so a noisy monitor during a long quiet window cannot
+# grow it without limit (#40); oldest deferred alerts are dropped past the cap.
+MAX_QUEUED_PER_USER = 200
+
 
 def _queue_digest(user_id: int, text: str) -> None:
-    """Append a deferred Alert to the user's digest queue (thread-safe-ish)."""
-    _digests.setdefault(user_id, []).append(text)
+    """Append a deferred Alert to the user's digest queue, bounded (#40)."""
+    q = _digests.setdefault(user_id, [])
+    q.append(text)
+    if len(q) > MAX_QUEUED_PER_USER:
+        dropped = len(q) - MAX_QUEUED_PER_USER
+        del q[:dropped]
+        log.warning(
+            "digest queue for user %s exceeded %d; dropped %d oldest deferred alert(s)",
+            user_id,
+            MAX_QUEUED_PER_USER,
+            dropped,
+        )
+
+
+def _chunk_message_groups(messages: list[str], header: str, limit: int) -> list[list[str]]:
+    """Split messages into groups whose rendered body stays within ``limit`` (#40).
+
+    Each group renders as ``header`` + blank-line-joined messages. A single
+    message longer than the budget is truncated with an ellipsis so it can never
+    wedge delivery.
+    """
+    sep = "\n\n"
+    base = len(header) + len(sep)  # header plus the separator before message 1
+    groups: list[list[str]] = []
+    cur: list[str] = []
+    cur_len = 0
+    for m in messages:
+        mt = m if len(m) <= limit - base else m[: limit - base - 1] + "…"
+        add = len(mt) + (len(sep) if cur else 0)
+        if cur and base + cur_len + add > limit:
+            groups.append(cur)
+            cur, cur_len = [], 0
+            add = len(mt)
+        cur.append(mt)
+        cur_len += add
+    if cur:
+        groups.append(cur)
+    return groups
 
 
 def queued_user_ids() -> list[int]:
@@ -191,8 +234,19 @@ async def flush_due_digests(
         chat_id = user.telegram_chat_id if user else None
         if not chat_id:
             continue  # no linked chat; drop (the alert was non-critical)
-        body = "📨 Quiet-hours digest (deferred alerts):\n\n" + "\n\n".join(messages)
-        if await ch.send(chat_id, body):
+        header = "📨 Quiet-hours digest (deferred alerts):"
+        groups = _chunk_message_groups(messages, header, TELEGRAM_MAX_CHARS)
+        sent_all = True
+        for i, group in enumerate(groups):
+            body = header + "\n\n" + "\n\n".join(group)
+            if not await ch.send(chat_id, body):
+                # Send failed: re-queue this chunk and everything after it,
+                # oldest-first, so nothing is silently dropped (#40). Stop here.
+                remaining = [m for g in groups[i:] for m in g]
+                _digests[user_id] = remaining + _digests.get(user_id, [])
+                sent_all = False
+                break
+        if sent_all:
             delivered += 1
     return delivered
 

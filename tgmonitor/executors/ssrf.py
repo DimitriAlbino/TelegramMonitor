@@ -107,6 +107,33 @@ def assert_safe_destination(
             raise DestinationBlocked(f"host {host!r} resolves to blocked internal address {addr}")
 
 
+def pick_safe_ip(host: str, *, resolver: Resolver | None = None) -> str | None:
+    """Resolve ``host`` and return one safe IP to pin a connection to (#39).
+
+    Raises :class:`DestinationBlocked` if *any* resolved address is internal
+    (defensive against a round-robin name with one internal answer). Returns
+    ``None`` if the host does not resolve — the caller then connects by name and
+    fails naturally at connect time. Pinning to the returned IP closes the
+    DNS-rebinding TOCTOU: the address validated here is the exact one connected
+    to, so a name cannot answer public to the guard and internal to the client.
+    """
+    resolve = resolver or _default_resolver
+    addrs = resolve(host)
+    if not addrs:
+        return None
+    safe: list[str] = []
+    for addr in addrs:
+        a = addr.split("%", 1)[0]  # strip an IPv6 zone id (fe80::1%eth0)
+        try:
+            ip = ipaddress.ip_address(a)
+        except ValueError:
+            continue
+        if is_blocked_ip(ip):
+            raise DestinationBlocked(f"host {host!r} resolves to blocked internal address {a}")
+        safe.append(a)
+    return safe[0] if safe else None
+
+
 def _extract_host(target: str, *, is_host_port: bool) -> str:
     """Pull the hostname out of a URL or ``host:port`` string.
 

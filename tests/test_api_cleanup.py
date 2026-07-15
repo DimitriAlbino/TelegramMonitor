@@ -13,7 +13,6 @@ import pytest
 from pydantic import ValidationError
 
 from tgmonitor.api.monitors import MonitorCreate
-from tgmonitor.api.statuspage import _monitor_state
 from tgmonitor.telegram.commands import _classify_monitor
 
 # --- api_content creation validation (#33) ---
@@ -90,24 +89,56 @@ def test_ok_with_successful_check_is_up() -> None:
 # --- public status JSON target leak (#33) ---
 
 
-def test_monitor_state_does_not_include_target() -> None:
-    # _render_page builds items from name + check_kind + _monitor_state(latest);
-    # _monitor_state itself must not surface the target. (The target removal is
-    # asserted structurally at the items level; here we pin the state shape.)
-    state = _monitor_state(None)
-    assert "target" not in state
-    assert state["state"] == "unknown"
+def test_status_item_never_exposes_target() -> None:
+    """The public status-page entry omits the raw target (#33/#44).
+
+    Behavioral: build the actual entry the JSON view emits and assert the origin
+    URL is absent while the display fields are present. This exercises the real
+    item builder (_render_page's per-monitor payload), not the state shape.
+    """
+    from tgmonitor.api.statuspage import _status_item
+
+    class _Monitor:
+        name = "Public site"
+        check_kind = "http"
+        target = "https://internal.origin.example/secret-path"
+
+    item = _status_item(_Monitor(), latest=None, incidents=[])
+    assert "target" not in item, "the public JSON must not leak the monitor target"
+    assert item["name"] == "Public site"
+    assert item["check_kind"] == "http"
+    assert item["state"] == "unknown"
+    # The target value must not appear anywhere in the serialized entry.
+    assert "internal.origin.example" not in str(item)
 
 
 # --- pagination (#33) ---
 
 
-def test_list_endpoints_accept_offset() -> None:
-    """Structural check: the list handlers declare an offset query param."""
-    import inspect
+async def test_list_monitors_applies_offset_to_query() -> None:
+    """list_monitors renders an OFFSET into its query so old rows are reachable (#33)."""
+    from tgmonitor.api.monitors import list_monitors
 
-    from tgmonitor.api.monitors import list_incidents, list_monitors
+    class _Res:
+        def scalars(self):
+            return self
 
-    for fn in (list_monitors, list_incidents):
-        params = inspect.signature(fn).parameters
-        assert "offset" in params, f"{fn.__name__} must support offset pagination"
+        def all(self):
+            return []
+
+    class _Session:
+        def __init__(self):
+            self.stmts: list[str] = []
+
+        async def execute(self, stmt):
+            self.stmts.append(str(stmt))
+            return _Res()
+
+    class _User:
+        id = 1
+
+    session = _Session()
+    await list_monitors(_User(), session, limit=50, offset=25)
+    assert any("OFFSET" in s.upper() for s in session.stmts), (
+        "the monitors query must apply the requested offset"
+    )
