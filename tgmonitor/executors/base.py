@@ -37,6 +37,9 @@ class CheckConfig:
     body_contains: str | None = None
     max_latency_ms: int | None = None
     timeout_s: float = 10.0
+    # When True, the HTTP transport follows 3xx redirects and checks the final
+    # response (so a 301 → 200 is reported as success, not as a 301 failure).
+    follow_redirects: bool = False
     # TCP knobs (ignored for http).
     tcp_timeout_s: float = 5.0
 
@@ -49,11 +52,15 @@ class Transport(Protocol):
     implementation: :class:`HttpTransport` (httpx). Tests inject a fake.
     """
 
-    async def request(self, url: str, *, timeout_s: float) -> tuple[int, str]:
+    async def request(
+        self, url: str, *, timeout_s: float, follow_redirects: bool = False
+    ) -> tuple[int, str]:
         """GET ``url``, returning ``(status_code, body_text)``.
 
-        Implementations raise on transport-level failure (connection refused,
-        timeout, DNS). The executor catches and converts to a failing Result.
+        ``follow_redirects`` lets the HTTP transport chase 3xx responses to the
+        final URL. Implementations raise on transport-level failure (connection
+        refused, timeout, DNS); the executor catches and converts to a failing
+        Result.
         """
         ...
 

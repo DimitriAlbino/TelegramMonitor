@@ -14,9 +14,9 @@ publish manual posts.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -133,18 +133,31 @@ async def _render_page(session: AsyncSession, page: StatusPage) -> dict[str, obj
 
 @public_router.get("/{slug}")
 async def public_status_page(
-    slug: str, response: Response, session: SessionDep
-) -> dict[str, object]:
+    slug: str,
+    response: Response,
+    request: Request,
+    session: SessionDep,
+) -> Any:
     """The public, unauthenticated, cached status page.
 
-    Returns JSON reflecting the live state of opted-in Monitors + Incident
-    history. Cache-Control headers keep traffic spikes off the DB (ADR-0009).
+    Renders a human-readable HTML page by default; returns JSON if
+    ``?format=json`` or ``Accept: application/json``. Cache-Control headers keep
+    traffic spikes off the DB (ADR-0009).
     """
     page = await session.scalar(select(StatusPage).where(StatusPage.slug == slug))
     if page is None or not page.enabled:
         raise HTTPException(status_code=404, detail="status page not found")
     response.headers["Cache-Control"] = f"public, max-age={CACHE_TTL_S}"
-    return await _render_page(session, page)
+    data = await _render_page(session, page)
+
+    accept = request.headers.get("accept", "")
+    want_json = request.query_params.get("format") == "json" or "application/json" in accept
+    if want_json:
+        return data
+    from fastapi.templating import Jinja2Templates
+
+    templates = Jinja2Templates(directory="templates")
+    return templates.TemplateResponse(request, "public_status.html", data)
 
 
 @config_router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)

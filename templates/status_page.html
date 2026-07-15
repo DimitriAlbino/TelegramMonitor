@@ -1,15 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Status Page — TelegramMonitor{% endblock %}
 {% block content %}
-<h1>Status Page</h1>
-
-{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
-{% if success %}<div class="flash flash-success">{{ success }}</div>{% endif %}
+<div class="page-header">
+  <h1>Status Page</h1>
+</div>
 
 {% if page %}
 <div class="card">
   <h2>Your public status page</h2>
-  <p>Public URL: <a href="/status/{{ page.slug }}"><strong>https://telegrammonitor.com/status/{{ page.slug }}</strong></a></p>
+  <p class="mb-1">Public URL: <a href="/status/{{ page.slug }}"><strong>telegrammonitor.com/status/{{ page.slug }}</strong></a></p>
   <form method="post" action="/ui/status-page/update" class="mt-2">
     <div class="form-group">
       <label for="title">Title</label>
@@ -25,13 +24,13 @@
 
 <div class="card">
   <h2>Monitors on the page</h2>
-  <p class="text-dim mb-2">Toggle which monitors appear on your public status page.</p>
+  <p class="text-dim text-sm mb-1">Toggle which monitors appear on your public status page.</p>
   {% if not monitors %}
-    <p class="empty-state">You have no monitors yet.</p>
+    <div class="empty-state">You have no monitors yet.</div>
   {% else %}
     {% for m in monitors %}
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border)">
-      <span>{{ m.name }} <span class="text-dim">({{ m.check_kind }})</span></span>
+    <div class="monitor-toggle-row">
+      <span>{{ m.name }} <span class="text-dim text-sm">({{ m.check_kind }})</span></span>
       <form method="post" action="/ui/monitors/{{ m.id }}/toggle-status-page">
         <label>
           <input type="checkbox" name="show" value="true" {{ 'checked' if m.show_on_status_page }}
@@ -47,7 +46,7 @@
 {% else %}
 <div class="card">
   <h2>Create your status page</h2>
-  <p class="text-dim">A public, read-only page showing the live state of your monitors.</p>
+  <p class="text-dim mb-1">A public, read-only page showing the live state of your monitors.</p>
   <form method="post" action="/ui/status-page" class="mt-2">
     <div class="form-group">
       <label for="slug">URL Slug (lowercase, letters, numbers, hyphens)</label>
