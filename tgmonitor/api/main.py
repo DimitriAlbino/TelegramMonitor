@@ -11,7 +11,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,8 +26,10 @@ from tgmonitor.auth.routes import router as auth_router
 from tgmonitor.db import dispose_engine, get_engine, get_session
 from tgmonitor.models import Check, Monitor, User
 from tgmonitor.telegram.webhook import router as telegram_router
+from tgmonitor.auth.tokens import decode_token
 from tgmonitor.ui.app_routes import router as ui_app_router
 from tgmonitor.ui.auth_routes import router as ui_auth_router
+from tgmonitor.ui.session import COOKIE_NAME
 
 # Annotated dependency aliases — the idiomatic FastAPI form that also satisfies
 # the "no function call in default" lint rule (B008).
