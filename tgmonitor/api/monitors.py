@@ -70,6 +70,13 @@ class MonitorCreate(MonitorBase):
     def validate_kind_fields(self) -> MonitorCreate:
         if self.check_kind == "tcp" and ":" not in self.target:
             raise ValueError("tcp target must be host:port")
+        # api_content requires its JSON knobs at creation (#33): without them
+        # the executor returns a permanent config-error failure that alerts like
+        # an outage, so the monitor sits forever "down" from the first Check.
+        if self.check_kind == "api_content" and (
+            not self.json_field_path or not self.json_keyword
+        ):
+            raise ValueError("api_content monitors require json_field_path and json_keyword")
         return self
 
 
@@ -216,9 +223,20 @@ async def list_monitors(
     user: ActiveUser,
     session: SessionDep,
     limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[MonitorOut]:
-    """List the user's Monitors with their latest Result as ``last_result``."""
-    stmt = select(Monitor).where(Monitor.user_id == user.id).order_by(Monitor.id).limit(limit)
+    """List the user's Monitors with their latest Result as ``last_result``.
+
+    Supports ``offset`` pagination so a User with many monitors can page through
+    them (#33).
+    """
+    stmt = (
+        select(Monitor)
+        .where(Monitor.user_id == user.id)
+        .order_by(Monitor.id)
+        .limit(limit)
+        .offset(offset)
+    )
     monitors = (await session.execute(stmt)).scalars().all()
 
     # Latest Result per monitor: a subquery of max(checked_at) per monitor joined
@@ -369,14 +387,18 @@ async def list_incidents(
     user: ActiveUser,
     session: SessionDep,
     limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[IncidentOut]:
-    """List Incidents for a Monitor (newest first). Ownership-scoped."""
+    """List Incidents for a Monitor (newest first). Ownership-scoped.
+
+    Supports ``offset`` pagination (#33)."""
     await _get_owned(monitor_id, user, session)
     stmt = (
         select(Incident)
         .where(Incident.monitor_id == monitor_id)
         .order_by(Incident.opened_at.desc())
         .limit(limit)
+        .offset(offset)
     )
     rows = (await session.execute(stmt)).scalars().all()
     return [_incident_to_out(i) for i in rows]
