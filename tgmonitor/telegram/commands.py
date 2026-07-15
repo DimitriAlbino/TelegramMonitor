@@ -41,11 +41,34 @@ async def cmd_help() -> str:
     return HELP_TEXT
 
 
+def _classify_monitor(monitor: Monitor, latest: Check | None) -> str:
+    """Classify a Monitor for /status, consistent with the dashboard badge (#33).
+
+    - ``paused`` takes precedence (no execution, no fresh results).
+    - ``incident_status`` is authoritative: ``down``/``flapping`` come from the
+      state machine, so /status agrees with the dashboard instead of guessing
+      from a single stale Check.
+    - A Monitor with zero Checks is ``unknown``, not silently ``up``.
+    - A paused Monitor is not reported ``down`` on a stale failed Check.
+    """
+    if monitor.paused:
+        return "paused"
+    if monitor.incident_status == "flapping":
+        return "flapping"
+    if monitor.incident_status == "down":
+        return "down"
+    if latest is None:
+        return "unknown"
+    return "up" if latest.success else "down"
+
+
 async def cmd_status(session: AsyncSession, user_id: int) -> str:
     """On-demand snapshot of all the user's Monitors (must be sub-second).
 
     Reads the latest Check per monitor in one batched query and renders an
-    all-up summary with per-monitor state + reason.
+    all-up summary with per-monitor state + reason. State is derived from
+    ``incident_status`` (the authoritative state-machine value) plus the latest
+    Check, so it matches the dashboard (#33).
     """
     monitors = (
         (
@@ -82,13 +105,20 @@ async def cmd_status(session: AsyncSession, user_id: int) -> str:
         ).scalars()
     }
 
-    down = [m for m in monitors if latest.get(m.id) and not latest[m.id].success]
-    if not down:
+    # Anything not "up" gets a line so the user sees paused/unknown/flapping/down.
+    flagged = [
+        (m, _classify_monitor(m, latest.get(m.id)))
+        for m in monitors
+        if _classify_monitor(m, latest.get(m.id)) != "up"
+    ]
+    if not flagged:
         return f"✅ All {len(monitors)} monitor(s) are up."
-    lines = [f"🔴 {len(down)}/{len(monitors)} monitor(s) are down:"]
-    for m in down:
-        c = latest[m.id]
-        lines.append(f"• <b>{_esc(m.name)}</b> — {_esc(c.reason)}")
+    lines = [f"⚠️ {len(flagged)}/{len(monitors)} monitor(s) need attention:"]
+    for m, state in flagged:
+        c = latest.get(m.id)
+        reason = _esc(c.reason) if c and not c.success else ""
+        tail = f" — {reason}" if reason else ""
+        lines.append(f"• <b>{_esc(m.name)}</b> [{state}]{tail}")
     return "\n".join(lines)
 
 

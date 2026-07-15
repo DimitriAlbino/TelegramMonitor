@@ -130,10 +130,12 @@ def create_app() -> FastAPI:
         user: ActiveUser,
         session: SessionDep,
         limit: int = Query(default=50, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
         """Return the most recent Check Results for a Monitor (newest first).
 
-        Ownership-scoped: a User only sees their own Monitors.
+        Ownership-scoped: a User only sees their own Monitors. Supports ``offset``
+        pagination so older results are reachable (#33).
         """
         monitor = await _get_owned_monitor(monitor_id, user, session)
 
@@ -142,6 +144,7 @@ def create_app() -> FastAPI:
             .where(Check.monitor_id == monitor_id)
             .order_by(desc(Check.checked_at))
             .limit(limit)
+            .offset(offset)
         )
         rows = (await session.execute(stmt)).scalars().all()
         return {
