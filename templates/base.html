@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}TelegramMonitor{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="nav">
+    <a href="/" class="nav-brand">📡 TelegramMonitor</a>
+    {% if current_user %}
+      <a href="/ui/monitors">Monitors</a>
+      <a href="/ui/status-page">Status Page</a>
+      <a href="/ui/settings">Settings</a>
+      <span class="nav-spacer"></span>
+      <span class="nav-user">{{ current_user.email }}</span>
+      <form method="post" action="/ui/logout" class="inline">
+        <button type="submit" class="btn-link">Log out</button>
+      </form>
+    {% endif %}
+  </nav>
+
+  <main class="container">
+    {% if success %}<div class="flash flash-success">{{ success }}</div>{% endif %}
+    {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Email verified — TelegramMonitor{% endblock %}
+{% block content %}
+<div class="card auth-card">
+  <h1>Email verified</h1>
+  {% if success %}
+    <div class="flash flash-success">{{ success }}</div>
+    <p class="mt-2">Your account is now active. <a href="/ui/login">Log in</a> to start monitoring.</p>
+  {% else %}
+    <div class="flash flash-error">{{ error }}</div>
+    <p class="mt-2"><a href="/ui/signup">Sign up again</a> or <a href="/ui/login">log in</a>.</p>
+  {% endif %}
+</div>
+{% endblock %}

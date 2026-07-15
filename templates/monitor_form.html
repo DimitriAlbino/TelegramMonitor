@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if m else 'New' }} Monitor — TelegramMonitor{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ 'Edit' if m else 'Create' }} Monitor</h1>
+  {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+  <form method="post" action="{{ '/ui/monitors/' ~ m.id ~ '/edit' if m else '/ui/monitors/new' }}">
+    <div class="form-group">
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" required value="{{ m.name if m else '' }}">
+    </div>
+    <div class="form-group">
+      <label for="check_kind">Check Kind</label>
+      <select id="check_kind" name="check_kind" {{ 'disabled' if m }}>
+        <option value="http" {{ 'selected' if not m or m.check_kind == 'http' }}>HTTP (GET a URL)</option>
+        <option value="tcp" {{ 'selected' if m and m.check_kind == 'tcp' }}>TCP (open host:port)</option>
+      </select>
+      {% if m %}<p class="text-dim mt-1">Kind cannot be changed after creation.</p>{% endif %}
+    </div>
+    <div class="form-group">
+      <label for="target">Target (URL for HTTP, host:port for TCP)</label>
+      <input type="text" id="target" name="target" required value="{{ m.target if m else '' }}">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="interval_s">Interval (seconds, min {{ min_interval }})</label>
+        <input type="number" id="interval_s" name="interval_s" required min="{{ min_interval or 30 }}" value="{{ m.interval_s if m else 30 }}">
+      </div>
+      <div class="form-group">
+        <label for="timeout_s">Timeout (seconds)</label>
+        <input type="number" id="timeout_s" name="timeout_s" step="0.5" value="{{ (m.config.timeout_s if m and m.config.timeout_s else 10.0) }}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="failure_threshold">Failure Threshold (consecutive failures to open)</label>
+        <input type="number" id="failure_threshold" name="failure_threshold" min="1" value="{{ m.failure_threshold if m else 3 }}">
+      </div>
+      <div class="form-group">
+        <label for="recovery_threshold">Recovery Threshold (consecutive successes to close)</label>
+        <input type="number" id="recovery_threshold" name="recovery_threshold" min="1" value="{{ m.recovery_threshold if m else 2 }}">
+      </div>
+    </div>
+
+    {# HTTP-specific fields (shown for http kind) #}
+    <div id="http-fields">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="expected_status">Expected Status Code</label>
+          <input type="number" id="expected_status" name="expected_status" value="{{ m.config.expected_status if m and m.config.expected_status else 200 }}">
+        </div>
+        <div class="form-group">
+          <label for="max_latency_ms">Max Latency (ms, optional)</label>
+          <input type="number" id="max_latency_ms" name="max_latency_ms" value="{{ m.config.max_latency_ms if m and m.config.max_latency_ms else '' }}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="body_contains">Required body keyword (optional)</label>
+        <input type="text" id="body_contains" name="body_contains" value="{{ m.config.body_contains if m and m.config.body_contains else '' }}">
+      </div>
+    </div>
+
+    <div class="form-group" style="display:flex;gap:1.5rem;margin-top:1rem">
+      <label><input type="checkbox" name="critical" value="true" {{ 'checked' if m and m.critical }}> Critical (bypasses quiet hours)</label>
+      <label><input type="checkbox" name="show_on_status_page" value="true" {{ 'checked' if m and m.show_on_status_page }}> Show on status page</label>
+    </div>
+
+    <button type="submit">{{ 'Save changes' if m else 'Create monitor' }}</button>
+    {% if m %}<a href="/ui/monitors/{{ m.id }}" class="btn-link" style="margin-left:1rem">Cancel</a>{% endif %}
+  </form>
+</div>
+
+<script>
+// Toggle HTTP-specific fields based on check_kind. On edit, kind is disabled so
+// the correct section is shown by default.
+document.getElementById('check_kind').addEventListener('change', function() {
+  document.getElementById('http-fields').style.display = this.value === 'http' ? '' : 'none';
+});
+</script>
+{% endblock %}
