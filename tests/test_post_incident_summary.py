@@ -10,7 +10,6 @@ or delivery was deferred.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -157,9 +156,7 @@ async def test_summary_not_sent_when_deferred(monkeypatch) -> None:
     _patch_db(monkeypatch, _FakeMonitor(), _FakeUser(quiet=True), inc)
     ch = _FakeChannel()
     # Inject a clock inside the 22:00-07:00 window so delivery is deferred.
-    sink = alerting.make_alert_sink(
-        channel=ch, now=lambda: datetime(2026, 7, 15, 3, 0, tzinfo=UTC)
-    )
+    sink = alerting.make_alert_sink(channel=ch, now=lambda: datetime(2026, 7, 15, 3, 0, tzinfo=UTC))
 
     await sink(AlertIntent(1, Action.CLOSE_INCIDENT, inc.id, "recovered"))
 

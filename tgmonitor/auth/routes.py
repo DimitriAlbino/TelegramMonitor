@@ -151,12 +151,18 @@ async def login(body: LoginIn, request: Request, session: SessionDep) -> TokenOu
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "account not verified")
-    return TokenOut(token=create_session_token(user.id))
+    return TokenOut(token=create_session_token(user.id, session_version=user.session_version))
 
 
 @router.post("/logout")
-async def logout() -> dict[str, str]:
-    """Sessions are stateless JWTs; logout is client-side (drop the token)."""
+async def logout(user: CurrentUser, session: SessionDep) -> dict[str, str]:
+    """Invalidate the current session server-side (#30).
+
+    Bumping session_version rejects every previously issued token for this User,
+    so logout is not merely client-side cookie deletion — a stolen token dies.
+    """
+    user.session_version += 1
+    await session.commit()
     return {"detail": "logged out"}
 
 
@@ -190,8 +196,11 @@ async def confirm_reset(body: ResetConfirmIn, session: SessionDep) -> TokenOut:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "reset link already used or invalid")
     user.password_hash = hash_password(body.password)
     user.reset_token_jti = None  # single-use
+    # Invalidate all prior sessions (#30): a password reset must revoke any
+    # stolen token that survived until now.
+    user.session_version += 1
     await session.commit()
-    return TokenOut(token=create_session_token(user.id))
+    return TokenOut(token=create_session_token(user.id, session_version=user.session_version))
 
 
 @router.post("/password", response_model=UserOut)
@@ -201,6 +210,9 @@ async def change_password(
     if not verify_password(body.current_password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "current password is incorrect")
     user.password_hash = hash_password(body.new_password)
+    # Invalidate other sessions (#30). The caller's current token also becomes
+    # stale; UI flows re-issue it. API clients must re-authenticate.
+    user.session_version += 1
     await session.commit()
     return UserOut(
         id=user.id,

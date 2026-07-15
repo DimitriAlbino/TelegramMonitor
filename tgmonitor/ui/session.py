@@ -46,6 +46,9 @@ async def get_current_user_cookie(
     user = await session.get(User, int(payload.sub))
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
+    # Session revocation (#30): reject tokens issued before a version bump.
+    if payload.sv != user.session_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session revoked")
     request.state.user = user
     return user
 

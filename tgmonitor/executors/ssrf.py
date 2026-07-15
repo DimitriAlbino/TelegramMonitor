@@ -42,9 +42,7 @@ def is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if ip.is_multicast or ip.is_unspecified or ip.is_reserved:
         return True
     # CGNAT 100.64.0.0/10 (is_private does not always cover it across versions).
-    if isinstance(ip, ipaddress.IPv4Address) and ip in ipaddress.IPv4Network("100.64.0.0/10"):
-        return True
-    return False
+    return isinstance(ip, ipaddress.IPv4Address) and ip in ipaddress.IPv4Network("100.64.0.0/10")
 
 
 # A resolver maps a hostname to a list of address strings (A/AAAA). The default
@@ -57,7 +55,7 @@ def _default_resolver(host: str) -> list[str]:
         infos = socket.getaddrinfo(host, None)
     except OSError:
         return []
-    return list({info[4][0] for info in infos})
+    return list({str(info[4][0]) for info in infos})
 
 
 def assert_safe_destination(
@@ -106,9 +104,7 @@ def assert_safe_destination(
         except ValueError:
             continue
         if is_blocked_ip(ipobj):
-            raise DestinationBlocked(
-                f"host {host!r} resolves to blocked internal address {addr}"
-            )
+            raise DestinationBlocked(f"host {host!r} resolves to blocked internal address {addr}")
 
 
 def _extract_host(target: str, *, is_host_port: bool) -> str:
