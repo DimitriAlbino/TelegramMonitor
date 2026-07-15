@@ -13,6 +13,7 @@ in the worker bridge (delivery layer, never the pure state machine).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from html import escape
 
@@ -57,19 +58,23 @@ def format_alert(intent: AlertIntent, monitor_name: str) -> str | None:
 
 def make_alert_sink(
     channel: NotificationChannel | None = None,
+    *,
+    now: "Callable[[], datetime] | None" = None,
 ) -> AlertSink:
     """Build the async alert_sink callable the CheckEngine wants.
 
     The sink resolves the Monitor's owning User's chat_id and delivers the
     formatted Alert. It opens its own short-lived session (the engine's session
     is already committed by the time the sink runs).
+
+    ``now`` is the clock provider (defaults to real UTC) so the quiet-hours
+    decision is testable without a wall clock.
     """
 
     ch = channel or NotificationChannel()
+    clock = now or (lambda: datetime.now(UTC))
 
     async def sink(intent: AlertIntent) -> None:
-        from datetime import UTC, datetime
-
         from tgmonitor.db import session_factory as sf
         from tgmonitor.telegram.quiet_hours import should_defer
 
@@ -86,32 +91,44 @@ def make_alert_sink(
             if text is None:
                 return
             # Quiet hours (ADR-0005): defer non-critical Alerts into the digest
-            # when inside the window; critical Monitors page immediately.
-            now = datetime.now(UTC)
-            if should_defer(
-                now_utc=now,
+            # when inside the window; critical Monitors page immediately. When
+            # deferred, do NOT send the post-incident summary either (#21): it
+            # would page during quiet hours, and stamping summary_sent_at would
+            # record it as sent with no retry.
+            deferred = should_defer(
+                now_utc=clock(),
                 start_hhmm=user.quiet_hours_start,
                 end_hhmm=user.quiet_hours_end,
                 tz_name=user.quiet_hours_tz,
                 critical=monitor.critical,
-            ):
+            )
+            if deferred:
                 log.info(
                     "deferring non-critical alert for monitor %s (quiet hours)", intent.monitor_id
                 )
                 _queue_digest(user.id, text)
                 return
-            await ch.send(user.telegram_chat_id, text)
-            # Post-incident Summary (ADR-0006 kind #3): after a recovery Alert,
-            # send a structured follow-up. The bridge already populated
-            # failed_check_count and set summary_sent_at; render + send here.
-            if intent.action is Action.CLOSE_INCIDENT and intent.incident_id is not None:
+            delivered = await ch.send(user.telegram_chat_id, text)
+            # Post-incident Summary (ADR-0006 kind #3): a structured follow-up
+            # distinct from the recovery one-liner. Send it only after the
+            # recovery Alert actually went out, and only stamp summary_sent_at
+            # after a confirmed summary send (#21) — never pre-stamp. (Mute is
+            # already honoured upstream: _maybe_alert does not call the sink for
+            # a muted monitor, so we never reach here when muted.)
+            if (
+                delivered
+                and intent.action is Action.CLOSE_INCIDENT
+                and intent.incident_id is not None
+            ):
                 from tgmonitor.incident_model import Incident
                 from tgmonitor.reports import render_post_incident_summary
 
                 inc = await session.get(Incident, intent.incident_id)
-                if inc is not None and inc.summary_sent_at is not None:
+                if inc is not None and inc.summary_sent_at is None:
                     summary = await render_post_incident_summary(session, inc)
-                    await ch.send(user.telegram_chat_id, summary)
+                    if await ch.send(user.telegram_chat_id, summary):
+                        inc.summary_sent_at = clock()
+                        await session.commit()
 
     return sink
 
