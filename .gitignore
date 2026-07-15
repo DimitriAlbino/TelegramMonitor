@@ -68,3 +68,4 @@ docker-compose.override.yml
 # --- DB / local data ---
 *.sqlite3
 pgdata/
+.zcode/

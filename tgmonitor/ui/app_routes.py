@@ -375,9 +375,6 @@ async def test_alert(
     return RedirectResponse(f"/ui/monitors/{monitor_id}", status_code=302)
 
 
-# ==================== U4: Link Telegram ====================
-
-
 # ==================== U5: Status Page config ====================
 
 

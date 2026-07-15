@@ -398,7 +398,7 @@ async def send_test_alert(
     if not chat_id:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "no linked Telegram chat; use the Link Telegram flow first",
+            "no linked Telegram chat; set your chat ID on the Settings page first",
         )
     from tgmonitor.telegram.client import NotificationChannel
 

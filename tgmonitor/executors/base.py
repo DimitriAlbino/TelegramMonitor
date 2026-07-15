@@ -30,7 +30,7 @@ class CheckConfig:
     """
 
     monitor_id: int
-    check_kind: str  # "http" | "tcp"
+    check_kind: str  # "http" | "tcp" | "api_content"
     target: str
     # HTTP knobs (ignored for tcp).
     expected_status: int = 200
