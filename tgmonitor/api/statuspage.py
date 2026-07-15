@@ -110,7 +110,8 @@ async def _render_page(session: AsyncSession, page: StatusPage) -> dict[str, obj
             {
                 "name": m.name,
                 "check_kind": m.check_kind,
-                "target": m.target,
+                # Do NOT expose the raw target (#33): the HTML page omits it but
+                # the JSON view leaked each monitor's origin/internal URL.
                 **_monitor_state(latest),
                 "incidents": [
                     {
