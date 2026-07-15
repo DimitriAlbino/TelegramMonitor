@@ -74,3 +74,74 @@ def classify_http(
         status_code=status_code,
         latency_ms=latency_ms,
     )
+
+
+def classify_api_content(
+    body_text: str,
+    json_field_path: str,
+    keyword: str,
+    *,
+    status_code: int | None = None,
+    latency_ms: int | None = None,
+) -> Result:
+    """Classify an API-content Check: parse JSON, read a field by dot-path, and
+    fail if the field's value contains the alarm keyword (substring match).
+
+    Pure function of (body, path, keyword) → Result:
+    - Non-JSON body → failure with reason.
+    - Missing field or null → failure with reason.
+    - Field value contains keyword → failure (the alarm condition).
+    - Otherwise → success.
+
+    Example: body ``{"mode": "stale"}``, path ``mode``, keyword ``stale`` → fail.
+    """
+    import json
+
+    try:
+        data = json.loads(body_text)
+    except (json.JSONDecodeError, TypeError):
+        return Result(
+            success=False,
+            reason="response is not valid JSON",
+            status_code=status_code,
+            latency_ms=latency_ms,
+        )
+
+    # Walk the dot-notation path through nested dicts.
+    current: object = data
+    parts = json_field_path.split(".")
+    walked: list[str] = []
+    for part in parts:
+        walked.append(part)
+        if not isinstance(current, dict) or part not in current:
+            return Result(
+                success=False,
+                reason=f"field '{'.'.join(walked)}' not found in response",
+                status_code=status_code,
+                latency_ms=latency_ms,
+            )
+        current = current[part]
+
+    if current is None:
+        return Result(
+            success=False,
+            reason=f"field '{json_field_path}' is null",
+            status_code=status_code,
+            latency_ms=latency_ms,
+        )
+
+    value_str = str(current)
+    if keyword in value_str:
+        return Result(
+            success=False,
+            reason=f"field '{json_field_path}' contains '{keyword}' (value: {value_str[:80]})",
+            status_code=status_code,
+            latency_ms=latency_ms,
+        )
+
+    return Result(
+        success=True,
+        reason=f"field '{json_field_path}' = {value_str[:80]}",
+        status_code=status_code,
+        latency_ms=latency_ms,
+    )

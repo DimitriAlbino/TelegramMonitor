@@ -31,7 +31,7 @@ router = APIRouter(prefix="/monitors", tags=["monitors"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
-VALID_KINDS = ("http", "tcp")
+VALID_KINDS = ("http", "tcp", "api_content")
 
 
 class HttpConfigIn(BaseModel):
@@ -47,7 +47,7 @@ class TcpConfigIn(BaseModel):
 
 class MonitorBase(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    check_kind: Literal["http", "tcp"]
+    check_kind: Literal["http", "tcp", "api_content"]
     target: str = Field(min_length=1, max_length=2048)
     interval_s: int = Field(ge=1)
     failure_threshold: int = Field(default=3, ge=1)
@@ -60,6 +60,9 @@ class MonitorBase(BaseModel):
     max_latency_ms: int | None = Field(default=None, ge=1)
     timeout_s: float | None = Field(default=None, ge=0.5, le=60.0)
     follow_redirects: bool = False
+    # api_content knobs (JSON field path + alarm keyword).
+    json_field_path: str | None = None
+    json_keyword: str | None = None
 
 
 class MonitorCreate(MonitorBase):
@@ -83,6 +86,8 @@ class MonitorUpdate(BaseModel):
     max_latency_ms: int | None = Field(default=None, ge=1)
     timeout_s: float | None = Field(default=None, ge=0.5, le=60.0)
     follow_redirects: bool | None = None
+    json_field_path: str | None = None
+    json_keyword: str | None = None
 
 
 class MonitorOut(BaseModel):
@@ -118,6 +123,10 @@ def _build_config(m: MonitorBase | MonitorUpdate) -> dict[str, Any]:
         cfg["tcp_timeout_s"] = m.timeout_s
     if getattr(m, "follow_redirects", None) is not None:
         cfg["follow_redirects"] = m.follow_redirects
+    if getattr(m, "json_field_path", None) is not None:
+        cfg["json_field_path"] = m.json_field_path
+    if getattr(m, "json_keyword", None) is not None:
+        cfg["json_keyword"] = m.json_keyword
     return cfg
 
 
@@ -267,6 +276,8 @@ async def update_monitor(
         "max_latency_ms",
         "timeout_s",
         "follow_redirects",
+        "json_field_path",
+        "json_keyword",
     }
     cfg = dict(monitor.config or {})
     for k in config_keys:

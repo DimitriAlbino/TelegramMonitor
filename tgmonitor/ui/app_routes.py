@@ -1,4 +1,4 @@
-"""Authenticated web UI routes — monitors, settings, link-telegram, status-page.
+"""Authenticated web UI routes — monitors, settings, status-page.
 
 All pages use the cookie-based session (``ActiveUserCookie``). They render the
 data the JSON API exposes (monitors, incidents, results, reports) as HTML.
@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tgmonitor.auth.tokens import create_purpose_token, hash_password, verify_password
+from tgmonitor.auth.tokens import hash_password, verify_password
 from tgmonitor.config import get_settings
 from tgmonitor.db import get_session
 from tgmonitor.incident_model import Incident
@@ -125,6 +125,8 @@ async def create_monitor_submit(
     max_latency_ms: Annotated[int | None, Form()] = None,
     timeout_s: Annotated[float, Form()] = 10.0,
     follow_redirects: Annotated[bool, Form()] = False,
+    json_field_path: Annotated[str, Form()] = "",
+    json_keyword: Annotated[str, Form()] = "",
     critical: Annotated[bool, Form()] = False,
     show_on_status_page: Annotated[bool, Form()] = False,
 ) -> Any:
@@ -166,6 +168,11 @@ async def create_monitor_submit(
             config["body_contains"] = body_contains
         if max_latency_ms:
             config["max_latency_ms"] = max_latency_ms
+    if check_kind == "api_content":
+        if json_field_path:
+            config["json_field_path"] = json_field_path
+        if json_keyword:
+            config["json_keyword"] = json_keyword
 
     monitor = Monitor(
         user_id=user.id,
@@ -267,6 +274,8 @@ async def edit_monitor_submit(
     max_latency_ms: Annotated[int | None, Form()] = None,
     timeout_s: Annotated[float, Form()] = 10.0,
     follow_redirects: Annotated[bool, Form()] = False,
+    json_field_path: Annotated[str, Form()] = "",
+    json_keyword: Annotated[str, Form()] = "",
     critical: Annotated[bool, Form()] = False,
     show_on_status_page: Annotated[bool, Form()] = False,
 ) -> Any:
@@ -356,7 +365,7 @@ async def test_alert(
                 "incidents": [],
                 "badge": "unknown",
                 "telegram_linked": False,
-                "error": "No linked Telegram chat. Use the Link Telegram page first.",
+                "error": "No linked Telegram chat. Set your chat ID in Settings first.",
             },
         )
     from tgmonitor.telegram.client import NotificationChannel
@@ -367,39 +376,6 @@ async def test_alert(
 
 
 # ==================== U4: Link Telegram ====================
-
-
-@router.get("/link-telegram")
-async def link_telegram_page(
-    request: Request, user: ActiveUserCookie, session: Annotated[AsyncSession, Depends(get_session)]
-) -> Any:
-    owner = await session.get(User, user.id)
-    linked_chat = owner.telegram_chat_id if owner else None
-    deep_link = None
-    if not linked_chat:
-        token, _ = create_purpose_token(user.id, "link", ttl_minutes=30)
-        bot_name = get_settings().telegram_login_bot_name or "TelegramMonitorBot"
-        deep_link = f"https://t.me/{bot_name}?start={token}"
-    return _render(
-        request,
-        "link_telegram.html",
-        {
-            "deep_link": deep_link,
-            "linked_chat": linked_chat,
-            "bot_name": get_settings().telegram_login_bot_name or "LightningApiBot",
-        },
-    )
-
-
-@router.post("/link-telegram/unlink")
-async def unlink_telegram(
-    user: ActiveUserCookie, session: Annotated[AsyncSession, Depends(get_session)]
-) -> RedirectResponse:
-    owner = await session.get(User, user.id)
-    if owner:
-        owner.telegram_chat_id = None
-        await session.commit()
-    return RedirectResponse("/ui/link-telegram", status_code=302)
 
 
 # ==================== U5: Status Page config ====================
@@ -587,4 +563,69 @@ async def set_quiet_hours(
         request,
         "settings.html",
         {"owner": owner, "error": None, "success": "Quiet hours updated."},
+    )
+
+
+@router.post("/settings/telegram-chat-id")
+async def set_telegram_chat_id(
+    request: Request,
+    user: ActiveUserCookie,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    telegram_chat_id: Annotated[str, Form()] = "",
+    action: Annotated[str, Form()] = "save",
+) -> Any:
+    """Set or remove the user's Telegram chat ID — the Notification Channel target."""
+    owner = await session.get(User, user.id)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="user not found")
+
+    if action == "remove":
+        owner.telegram_chat_id = None
+        await session.commit()
+        return _render(
+            request,
+            "settings.html",
+            {"owner": owner, "error": None, "success": "Telegram chat ID removed."},
+        )
+
+    chat_id = telegram_chat_id.strip()
+    if not chat_id or not chat_id.isdigit() or len(chat_id) > 20:
+        return _render(
+            request,
+            "settings.html",
+            {
+                "owner": owner,
+                "error": "Chat ID must be numeric (message @userinfobot on Telegram to find yours).",
+                "success": None,
+            },
+        )
+
+    owner.telegram_chat_id = chat_id
+    await session.commit()
+
+    # Send one confirmation message to the chat as a cheap mistake/abuse signal.
+    # Delivery failure is non-blocking — the ID is saved regardless.
+    delivery_note = ""
+    try:
+        from tgmonitor.telegram.client import NotificationChannel
+
+        channel = NotificationChannel()
+        sent = await channel.send(
+            chat_id,
+            "This chat is now linked to your TelegramMonitor account. "
+            "If this wasn't you, go to Settings and remove the chat ID.",
+        )
+        if not sent:
+            delivery_note = " Chat ID saved, but the confirmation message could not be delivered — verify the ID is correct."
+    except Exception:
+        delivery_note = " Chat ID saved, but the confirmation message could not be delivered."
+
+    return _render(
+        request,
+        "settings.html",
+        {
+            "owner": owner,
+            "error": None,
+            "success": f"Telegram chat ID saved ({chat_id}).{delivery_note}",
+        },
     )
