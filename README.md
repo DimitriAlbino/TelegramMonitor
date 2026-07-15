@@ -136,9 +136,10 @@ alembic upgrade head --sql     # emit migration SQL offline (no DB needed)
 
 ## Demo
 
-The demo user (`demo@example.com` / `demo12345`) is seeded by migration with one
-HTTP Monitor probing `https://example.com` every 30s. You can sign up with your
-own email and add monitors immediately.
+A seed HTTP Monitor probing `https://example.com` every 30s is created on first
+migrate so the worker immediately has something to probe. The historical
+seeded demo account with a known password was removed for security — sign up
+with your own email and add monitors immediately.
 
 ## Status & roadmap
 
