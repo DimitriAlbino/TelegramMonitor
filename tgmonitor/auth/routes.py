@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tgmonitor.auth.dependencies import CurrentUser
 from tgmonitor.auth.email import send_reset_email, send_verification_email
-from tgmonitor.auth.ratelimit import get_email_limiter, get_ip_limiter
+from tgmonitor.auth.ratelimit import client_ip_from_request, get_email_limiter, get_ip_limiter
 from tgmonitor.auth.tokens import (
     create_purpose_token,
     create_session_token,
@@ -35,6 +35,11 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 # A modest floor on password length. Not a complexity theater — just a bound.
 MIN_PASSWORD_LEN = 8
+
+# A dummy argon2 hash used to keep login timing constant when the email is not
+# registered (#29): without it, a missing User short-circuits before the password
+# hash check, creating a timing oracle that contradicts the route's own comment.
+_DUMMY_HASH = hash_password("constant-time-dummy-do-not-use")
 
 
 class SignupIn(BaseModel):
@@ -78,32 +83,32 @@ class UserOut(BaseModel):
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    return client_ip_from_request(request)
 
 
-@router.post("/signup", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
-async def signup(body: SignupIn, request: Request, session: SessionDep) -> TokenOut:
+@router.post("/signup", status_code=status.HTTP_201_CREATED)
+async def signup(body: SignupIn, request: Request, session: SessionDep) -> dict[str, str]:
     if not await get_ip_limiter().check(_client_ip(request)):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "too many attempts from this IP")
     if not await get_email_limiter().check(body.email.lower()):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "too many attempts for this email")
 
     existing = await session.scalar(select(User).where(User.email == body.email.lower()))
-    if existing is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "email already registered")
-
-    user = User(
-        email=body.email.lower(), password_hash=hash_password(body.password), is_active=False
-    )
-    session.add(user)
-    await session.flush()
-    token, jti = create_purpose_token(user.id, "verify")
-    user.verify_token_jti = jti
-    await session.commit()
-    send_verification_email(user.email, token)
-    # Return a session token so the client is logged in immediately; full
-    # access still requires verification (require_user checks is_active).
-    return TokenOut(token=create_session_token(user.id))
+    if existing is None:
+        user = User(
+            email=body.email.lower(), password_hash=hash_password(body.password), is_active=False
+        )
+        session.add(user)
+        await session.flush()
+        token, jti = create_purpose_token(user.id, "verify")
+        user.verify_token_jti = jti
+        await session.commit()
+        send_verification_email(user.email, token)
+    # Neutral response (#29): identical whether or not the email was already
+    # registered, consistent with the reset flow. Returning a session token
+    # only for a brand-new account would leak registration status via the body,
+    # so the client is directed to verify its email either way.
+    return {"detail": "if this email is not already registered, a verification link has been sent"}
 
 
 @router.post("/verify", response_model=UserOut)
@@ -135,8 +140,14 @@ async def login(body: LoginIn, request: Request, session: SessionDep) -> TokenOu
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "too many attempts for this email")
 
     user = await session.scalar(select(User).where(User.email == body.email.lower()))
-    # Always hash-check even on a missing user to blunt timing-based enumeration.
-    if user is None or not verify_password(body.password, user.password_hash):
+    # Constant-time password check even for a missing User (#29): run a real
+    # argon2 verify against a dummy hash so the response timing does not branch
+    # on user existence. The route's old comment claimed this; the code didn't
+    # (the `or` short-circuited before the hash check). Evaluate verify_password
+    # unconditionally, then decide.
+    stored_hash = user.password_hash if user is not None else _DUMMY_HASH
+    password_ok = verify_password(body.password, stored_hash)
+    if user is None or not password_ok:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "account not verified")
@@ -153,8 +164,13 @@ async def logout() -> dict[str, str]:
 async def request_reset(
     body: ResetRequestIn, request: Request, session: SessionDep
 ) -> dict[str, str]:
-    # Always 200 — never reveal whether an email is registered.
-    await get_ip_limiter().check(_client_ip(request))
+    # Enforce the limiter (#29): the result was discarded, so reset requests
+    # were unthrottled (each also rotates the reset token, invalidating prior
+    # legitimate links). Always 200 — never reveal whether an email is registered.
+    if not await get_ip_limiter().check(_client_ip(request)):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "too many attempts from this IP")
+    if not await get_email_limiter().check(body.email.lower()):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "too many attempts for this email")
     user = await session.scalar(select(User).where(User.email == body.email.lower()))
     if user is not None:
         token, jti = create_purpose_token(user.id, "reset")
