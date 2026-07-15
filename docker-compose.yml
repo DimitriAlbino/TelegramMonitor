@@ -27,6 +27,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tgmonitor}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-tgmonitor}
       SECRET_KEY: ${SECRET_KEY:-change-me-to-a-long-random-string}
@@ -44,6 +45,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tgmonitor}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-tgmonitor}
       SECRET_KEY: ${SECRET_KEY:-change-me-to-a-long-random-string}
