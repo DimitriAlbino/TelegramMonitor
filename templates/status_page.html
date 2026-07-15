@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Status Page — TelegramMonitor{% endblock %}
+{% block content %}
+<h1>Status Page</h1>
+
+{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+{% if success %}<div class="flash flash-success">{{ success }}</div>{% endif %}
+
+{% if page %}
+<div class="card">
+  <h2>Your public status page</h2>
+  <p>Public URL: <a href="/status/{{ page.slug }}"><strong>https://telegrammonitor.com/status/{{ page.slug }}</strong></a></p>
+  <form method="post" action="/ui/status-page/update" class="mt-2">
+    <div class="form-group">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" value="{{ page.title }}">
+    </div>
+    <div class="form-group">
+      <label for="subtitle">Subtitle</label>
+      <input type="text" id="subtitle" name="subtitle" value="{{ page.subtitle or '' }}">
+    </div>
+    <button type="submit">Update</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Monitors on the page</h2>
+  <p class="text-dim mb-2">Toggle which monitors appear on your public status page.</p>
+  {% if not monitors %}
+    <p class="empty-state">You have no monitors yet.</p>
+  {% else %}
+    {% for m in monitors %}
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0;border-bottom:1px solid var(--border)">
+      <span>{{ m.name }} <span class="text-dim">({{ m.check_kind }})</span></span>
+      <form method="post" action="/ui/monitors/{{ m.id }}/toggle-status-page">
+        <label>
+          <input type="checkbox" name="show" value="true" {{ 'checked' if m.show_on_status_page }}
+                 onchange="this.form.submit()">
+          Show
+        </label>
+      </form>
+    </div>
+    {% endfor %}
+  {% endif %}
+</div>
+
+{% else %}
+<div class="card">
+  <h2>Create your status page</h2>
+  <p class="text-dim">A public, read-only page showing the live state of your monitors.</p>
+  <form method="post" action="/ui/status-page" class="mt-2">
+    <div class="form-group">
+      <label for="slug">URL Slug (lowercase, letters, numbers, hyphens)</label>
+      <input type="text" id="slug" name="slug" required pattern="[a-z0-9][a-z0-9-]*" placeholder="my-company">
+    </div>
+    <div class="form-group">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" value="Status">
+    </div>
+    <div class="form-group">
+      <label for="subtitle">Subtitle (optional)</label>
+      <input type="text" id="subtitle" name="subtitle" placeholder="Service status">
+    </div>
+    <button type="submit">Create status page</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

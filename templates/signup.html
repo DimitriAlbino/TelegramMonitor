@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Sign up — TelegramMonitor{% endblock %}
+{% block content %}
+<div class="card auth-card">
+  <h1>Sign up</h1>
+  {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+  {% if success %}<div class="flash flash-success">{{ success }}</div>{% endif %}
+  <form method="post" action="/ui/signup">
+    <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autofocus value="{{ email }}">
+    </div>
+    <div class="form-group">
+      <label for="password">Password (min 8 characters)</label>
+      <input type="password" id="password" name="password" required minlength="8">
+    </div>
+    <button type="submit">Create account</button>
+  </form>
+  <div class="auth-links">
+    Already have an account? <a href="/ui/login">Log in</a>
+  </div>
+</div>
+{% endblock %}

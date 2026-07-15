@@ -1,0 +1,174 @@
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface-2: #242836;
+  --border: #2e3344;
+  --text: #e4e6eb;
+  --text-dim: #9499a8;
+  --accent: #4a9eff;
+  --accent-hover: #6bb0ff;
+  --green: #3dd68c;
+  --red: #f87171;
+  --yellow: #fbbf24;
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* Nav */
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.85rem 2rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.nav-brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--text);
+  text-decoration: none;
+}
+.nav a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.92rem;
+  transition: color 0.15s;
+}
+.nav a:hover { color: var(--accent); }
+.nav-spacer { flex: 1; }
+.nav-user { color: var(--text-dim); font-size: 0.85rem; }
+.inline { display: inline; }
+
+/* Layout */
+.container {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 0 2rem;
+}
+.container-wide { max-width: 1100px; }
+
+/* Cards / surfaces */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+/* Headings */
+h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+h2 { font-size: 1.15rem; margin-bottom: 0.75rem; }
+
+/* Forms */
+.form-group { margin-bottom: 1rem; }
+label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-bottom: 0.3rem;
+}
+input[type=text], input[type=email], input[type=password], input[type=url],
+input[type=number], input[type=time], select, textarea {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+/* Buttons */
+button, .btn {
+  padding: 0.6rem 1.2rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 0.92rem;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.15s;
+}
+button:hover, .btn:hover { background: var(--accent-hover); }
+.btn-link {
+  background: none;
+  color: var(--text-dim);
+  padding: 0;
+  font-size: inherit;
+}
+.btn-link:hover { color: var(--accent); background: none; }
+.btn-danger { background: var(--red); }
+.btn-danger:hover { background: #ef4444; }
+.btn-sm { padding: 0.35rem 0.7rem; font-size: 0.82rem; }
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th, td {
+  text-align: left;
+  padding: 0.7rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+th { color: var(--text-dim); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.badge-up { background: rgba(61,214,140,0.15); color: var(--green); }
+.badge-down { background: rgba(248,113,113,0.15); color: var(--red); }
+.badge-paused { background: rgba(148,153,168,0.15); color: var(--text-dim); }
+.badge-flapping { background: rgba(251,191,36,0.15); color: var(--yellow); }
+.badge-unknown { background: rgba(148,153,168,0.15); color: var(--text-dim); }
+
+/* Flash messages */
+.flash {
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius);
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+.flash-success { background: rgba(61,214,140,0.1); border: 1px solid rgba(61,214,140,0.3); color: var(--green); }
+.flash-error { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--red); }
+
+/* Auth */
+.auth-card { max-width: 400px; margin: 3rem auto; }
+.auth-links { margin-top: 1rem; font-size: 0.85rem; color: var(--text-dim); }
+.auth-links a { color: var(--accent); }
+
+/* Misc */
+.text-dim { color: var(--text-dim); }
+.mt-1 { margin-top: 0.5rem; }
+.mt-2 { margin-top: 1rem; }
+.actions { display: flex; gap: 0.5rem; }
+.empty-state { text-align: center; padding: 3rem; color: var(--text-dim); }
+.empty-state a { color: var(--accent); }

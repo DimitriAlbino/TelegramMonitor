@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ m.name }} — TelegramMonitor{% endblock %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+  <h1>{{ m.name }}</h1>
+  <div class="actions">
+    <a href="/ui/monitors/{{ m.id }}/edit" class="btn-sm">Edit</a>
+    {% if telegram_linked %}
+    <form method="post" action="/ui/monitors/{{ m.id }}/test-alert"><button class="btn-sm">Test alert</button></form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <span class="badge badge-{{ badge }}">{{ badge }}</span>
+  <span class="text-dim" style="margin-left:1rem">{{ m.check_kind }} · {{ m.target }}</span>
+  {% if m.paused %}<p class="text-dim mt-1">⏸ Paused — Checks are not running.</p>{% endif %}
+  <p class="text-dim mt-1">Thresholds: {{ m.failure_threshold }} failures / {{ m.recovery_threshold }} successes · Interval: {{ m.interval_s }}s{% if m.critical %} · 🔴 critical{% endif %}</p>
+</div>
+
+<h2>Recent Checks ({{ results|length }})</h2>
+<div class="card" style="padding:0">
+  {% if not results %}
+    <p class="empty-state">No checks yet. The first result will appear within {{ m.interval_s }}s.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Time</th><th>Result</th><th>Status</th><th>Latency</th><th>Reason</th></tr></thead>
+    <tbody>
+    {% for r in results %}
+      <tr>
+        <td class="text-dim">{{ r.checked_at.strftime('%Y-%m-%d %H:%M:%S') if r.checked_at else '—' }}</td>
+        <td>{{ '✅' if r.success else '❌' }}</td>
+        <td>{{ r.status_code if r.status_code != None else '—' }}</td>
+        <td>{{ r.latency_ms ~ 'ms' if r.latency_ms != None else '—' }}</td>
+        <td>{{ r.reason }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<h2 class="mt-2">Incident Timeline</h2>
+<div class="card" style="padding:0">
+  {% if not incidents %}
+    <p class="empty-state">No incidents recorded.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Opened</th><th>Closed</th><th>Duration</th><th>Reason</th><th>Outcome</th></tr></thead>
+    <tbody>
+    {% for inc in incidents %}
+      <tr>
+        <td class="text-dim">{{ inc.opened_at.strftime('%Y-%m-%d %H:%M') if inc.opened_at else '—' }}</td>
+        <td class="text-dim">{{ inc.closed_at.strftime('%Y-%m-%d %H:%M') if inc.closed_at else '— open —' }}</td>
+        <td>
+          {% if inc.closed_at and inc.opened_at %}
+            {{ ((inc.closed_at - inc.opened_at).total_seconds() / 60)|round(1) }} min
+          {% endif %}
+        </td>
+        <td>{{ inc.open_reason }}</td>
+        <td>{{ inc.outcome or 'open' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endblock %}
