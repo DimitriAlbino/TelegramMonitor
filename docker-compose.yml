@@ -34,10 +34,14 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
-      TELEGRAM_LOGIN_BOT_NAME: ${TELEGRAM_LOGIN_BOT_NAME:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+    # Bind to localhost only (#34): the reverse proxy (Caddy) reaches the api
+    # over the internal Docker network, so there is no need to publish the port
+    # on 0.0.0.0 (one firewall rule from bypassing Caddy/TLS). Map to 127.0.0.1
+    # so local `curl localhost:8000` still works in dev.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     restart: unless-stopped
 
   worker:
@@ -56,7 +60,6 @@ services:
       MAX_MONITORS_PER_USER: ${MAX_MONITORS_PER_USER:-50}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
-      TELEGRAM_LOGIN_BOT_NAME: ${TELEGRAM_LOGIN_BOT_NAME:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
     command: ["python", "-m", "tgmonitor.worker"]
     restart: unless-stopped

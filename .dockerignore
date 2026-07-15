@@ -14,6 +14,10 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Agent / local tooling — not part of the runtime image (#34).
+.zcode/
+.claude/
+
 # Secrets / local-only
 .env
 .env.*

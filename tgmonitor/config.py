@@ -2,7 +2,7 @@
 
 One :class:`Settings` instance, hydrated from environment variables (or ``.env``).
 Every variable read by any service is declared here so this module is the single
-source of truth — the ``.env.example`` file mirrors these names one-for-one.
+source of truth; ``.env.example`` documents the same set.
 
 See ADR-0003 (stack), ADR-0004 (engine knobs).
 """
@@ -35,12 +35,13 @@ class Settings(BaseSettings):
     # Async and raw psycopg URLs are derived below so only one env var is needed.
     database_url: str = Field(default="postgresql+psycopg://tgmonitor:change-me@db:5432/tgmonitor")
 
-    # --- Telegram (unused by T1; declared so .env.example stays the contract) ---
+    # --- Telegram (shared bot) ---
+    # From @BotFather; the bot token used for outbound alerts and the inbound
+    # webhook. Empty in dev (sends are logged and skipped).
     telegram_bot_token: str = Field(default="")
-    telegram_webhook_public_url: str = Field(default="")
+    # Secret token we set when registering the webhook; Telegram echoes it back
+    # in the X-Telegram-Bot-Api-Secret-Token header (ADR-0012).
     telegram_webhook_secret: str = Field(default="")
-    telegram_login_bot_name: str = Field(default="")
-    telegram_login_provider_token: str = Field(default="")
 
     # --- Email (SMTP for signup verification + password reset) ---
     smtp_host: str = Field(default="")
