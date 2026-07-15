@@ -28,11 +28,24 @@ def test_next_run_is_tomorrow_when_delivery_time_passed() -> None:
     assert nxt == datetime(2026, 7, 16, 8, 0, tzinfo=UTC)
 
 
-def test_next_run_weekly_skips_correct_days() -> None:
-    """Weekly cadence advances 7 days from the just-fired time."""
-    now = datetime(2026, 7, 15, 10, 0, tzinfo=UTC)
+def test_next_run_weekly_advances_seven_days() -> None:
+    """Weekly cadence: a passed delivery_time today lands 7 days out (#31)."""
+    now = datetime(2026, 7, 15, 10, 0, tzinfo=UTC)  # past today's 08:00
     nxt = next_run_for_delivery_time("08:00", "UTC", cadence_days=7, now=now)
-    assert nxt == datetime(2026, 7, 16, 8, 0, tzinfo=UTC)  # next 08:00, then +7 logic
+    assert nxt == datetime(2026, 7, 22, 8, 0, tzinfo=UTC)  # +7 days, not tomorrow
+
+
+def test_next_run_weekly_today_if_still_upcoming() -> None:
+    """Weekly cadence with delivery_time still upcoming today fires today."""
+    now = datetime(2026, 7, 15, 6, 0, tzinfo=UTC)  # before today's 08:00
+    nxt = next_run_for_delivery_time("08:00", "UTC", cadence_days=7, now=now)
+    assert nxt == datetime(2026, 7, 15, 8, 0, tzinfo=UTC)
+
+
+def test_next_run_monthly_advances_thirty_days() -> None:
+    now = datetime(2026, 7, 15, 10, 0, tzinfo=UTC)
+    nxt = next_run_for_delivery_time("08:00", "UTC", cadence_days=30, now=now)
+    assert nxt == datetime(2026, 8, 14, 8, 0, tzinfo=UTC)
 
 
 def test_next_run_applies_timezone() -> None:

@@ -101,6 +101,21 @@ async def test_boundary_now_equals_end_delivers() -> None:
     assert n == 1
 
 
+async def test_boundary_now_equals_start_defers() -> None:
+    """At exactly the start time the window is inclusive → still deferred (#20)."""
+    alerting._digests[1] = ["🔴 A down"]
+    lookup = _FakeLookup(_FakeUser(start="22:00", end="07:00"))
+    ch = _FakeChannel()
+    n = await alerting.flush_due_digests(
+        channel=ch,
+        now_utc=datetime(2026, 7, 15, 22, 0, tzinfo=UTC),  # == start → inside
+        user_lookup=lookup,
+    )
+    assert n == 0
+    assert ch.sent == []
+    assert alerting._digests.get(1) == ["🔴 A down"]
+
+
 async def test_no_chat_id_drops_silently() -> None:
     """A deferred digest for a user with no linked chat is dropped (non-critical)."""
     alerting._digests[1] = ["🔴 A down"]
