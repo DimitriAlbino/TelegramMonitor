@@ -23,10 +23,10 @@ from tgmonitor.api.statuspage import config_router as statuspage_config_router
 from tgmonitor.api.statuspage import public_router as statuspage_public_router
 from tgmonitor.auth.dependencies import ActiveUser
 from tgmonitor.auth.routes import router as auth_router
+from tgmonitor.auth.tokens import decode_token
 from tgmonitor.db import dispose_engine, get_engine, get_session
 from tgmonitor.models import Check, Monitor, User
 from tgmonitor.telegram.webhook import router as telegram_router
-from tgmonitor.auth.tokens import decode_token
 from tgmonitor.ui.app_routes import router as ui_app_router
 from tgmonitor.ui.auth_routes import router as ui_auth_router
 from tgmonitor.ui.session import COOKIE_NAME
