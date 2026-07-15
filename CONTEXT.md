@@ -16,7 +16,7 @@ _Avoid_: Service, probe, check (a "probe" or "check" is a single execution; the 
 Two independent states a Monitor can be in, often confused. **Paused** means the engine stops running Checks for it (no execution, no Results) — set from the web UI for a Monitor you're decommissioning or temporarily not using. **Muted** means Checks keep running and Incidents keep being recorded, but Alert delivery is suppressed — settable from Telegram (`/mute`) for a Monitor you already know is down. A Monitor can be neither, either, or both; the two flags don't interact.
 
 **Check Kind**:
-The category of probe a Monitor performs. Launch kinds are **HTTP** (GET a URL, assert status / keyword / latency) and **TCP** (open a socket to host:port).
+The category of probe a Monitor performs. Kinds are **HTTP** (GET a URL, assert status / keyword / latency), **TCP** (open a socket to host:port), and **API content** (GET a JSON URL, read a field by dot-path, fail if it contains an alarm keyword).
 _Avoid_: Monitor type (the Monitor is the configured instance; the Kind is the verb).
 
 **Check**:

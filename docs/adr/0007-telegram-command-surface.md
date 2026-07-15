@@ -4,7 +4,7 @@ The shared bot supports a full interactive loop, not just outbound alerts. Launc
 
 | Command | Purpose |
 |---|---|
-| `/start [link_token]` | Account linking (token via deep link from the web UI) + help when called bare. |
+| `/start` | Help only — shows the user their chat ID and points to the Settings page to link. (The tokenized `/start <link_token>` binding was removed; linking is now a manual chat-ID entry on the Settings page.) |
 | `/status` | On-demand Report — current live state of all the user's Monitors. |
 | `/mute <monitor>` / `/unmute <monitor>` | Suppress Alert delivery for a Monitor (supports `/mute all`). |
 | `/incidents` | List the user's recent Incidents. |

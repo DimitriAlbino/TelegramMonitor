@@ -20,8 +20,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tgmonitor.auth.dependencies import CurrentUser
-from tgmonitor.auth.tokens import create_purpose_token, decode_token
 from tgmonitor.config import get_settings
 from tgmonitor.db import get_session
 from tgmonitor.models import User
@@ -86,8 +84,9 @@ async def telegram_webhook(
     if user is None:
         await _reply(
             chat_id,
-            "I don't recognize this chat. Please link your account at "
-            f"{get_settings().public_base_url}",
+            "I don't recognize this chat. To link your account, go to "
+            f"{get_settings().public_base_url}/ui/settings and enter your "
+            f"Telegram chat ID (it's {chat_id}).",
         )
         return {"status": "ok"}
 
@@ -117,37 +116,19 @@ async def _user_for_chat(session: AsyncSession, chat_id: str) -> User | None:
 
 
 async def _handle_start(session: AsyncSession, chat_id: str, arg: str) -> None:
-    """Handle /start [link_token]: link the chat or show help."""
-    if not arg:
-        # Bare /start — help message pointing to the web UI.
-        await _reply(
-            chat_id,
-            "Welcome to TelegramMonitor! Link your account by visiting "
-            f"{get_settings().public_base_url} and using the 'Link Telegram' flow.\n"
-            "Once linked, I'll alert you when your monitors go down.",
-        )
-        return
+    """Handle /start: show help and point to the Settings page.
 
-    # /start <link_token> — bind this chat to the account.
-    payload = decode_token(arg, expected_purpose="link")
-    if payload is None:
-        await _reply(chat_id, "That link is invalid or expired. Please generate a new one.")
-        return
-    user = await session.get(User, int(payload.sub))
-    if user is None:
-        await _reply(chat_id, "Account not found. Please contact support.")
-        return
-    # Idempotent: binding twice to the same chat is a no-op. Binding a different
-    # chat rebinds (the user re-linked from a new chat).
-    user.telegram_chat_id = chat_id
-    await session.commit()
-    await _reply(chat_id, f"✅ Linked to {user.email}. You'll now receive alerts here.")
-
-
-@router.get("/link-token")
-async def create_link_token_endpoint(user: CurrentUser) -> dict[str, str]:
-    """Generate a one-time deep-link token + the t.me URL for the user."""
-    token, _ = create_purpose_token(user.id, "link", ttl_minutes=30)
-    bot_name = get_settings().telegram_login_bot_name or "TelegramMonitorBot"
-    deep_link = f"https://t.me/{bot_name}?start={token}"
-    return {"token": token, "deep_link": deep_link}
+    The tokenized deep-link binding flow was removed (ADR-0002 superseded).
+    Users now link Telegram via the manual chat-ID field on the Settings page.
+    ``/start`` with any argument is treated the same as bare ``/start``.
+    """
+    base = get_settings().public_base_url
+    await _reply(
+        chat_id,
+        "Welcome to TelegramMonitor!\n\n"
+        f"To link this chat to your account, go to {base}/ui/settings and "
+        "enter your Telegram chat ID (yours is below) in the Telegram card.\n\n"
+        f"Your chat ID: {chat_id}\n\n"
+        "Once linked, I'll alert you when your monitors go down. "
+        "Send /help for the command list.",
+    )

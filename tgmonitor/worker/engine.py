@@ -61,6 +61,8 @@ class ClaimedMonitor:
     timeout_s: float
     follow_redirects: bool
     tcp_timeout_s: float
+    json_field_path: str | None
+    json_keyword: str | None
 
     def to_check_config(self) -> CheckConfig:
         return CheckConfig(
@@ -73,6 +75,8 @@ class ClaimedMonitor:
             timeout_s=self.timeout_s,
             follow_redirects=self.follow_redirects,
             tcp_timeout_s=self.tcp_timeout_s,
+            json_field_path=self.json_field_path,
+            json_keyword=self.json_keyword,
         )
 
 
@@ -100,7 +104,9 @@ CLAIM_DUE_SQL = text(
               COALESCE(NULLIF(config->>'timeout_s','')::float, 10.0) AS timeout_s,
               COALESCE((config->>'follow_redirects')::bool, false) AS follow_redirects,
               COALESCE(NULLIF(config->>'tcp_timeout_s','')::float,
-                       NULLIF(config->>'timeout_s','')::float, 5.0) AS tcp_timeout_s
+                       NULLIF(config->>'timeout_s','')::float, 5.0) AS tcp_timeout_s,
+              config->>'json_field_path' AS json_field_path,
+              config->>'json_keyword'    AS json_keyword
     """
 )
 
@@ -126,6 +132,8 @@ async def claim_due_monitors(session: AsyncSession, batch_limit: int) -> list[Cl
             timeout_s=r.timeout_s if r.timeout_s is not None else 10.0,
             follow_redirects=r.follow_redirects if r.follow_redirects is not None else False,
             tcp_timeout_s=r.tcp_timeout_s if r.tcp_timeout_s is not None else 5.0,
+            json_field_path=r.json_field_path,
+            json_keyword=r.json_keyword,
         )
         for r in rows
     ]
