@@ -65,25 +65,28 @@
 <div class="card">
   <h2>Telegram</h2>
   <p class="text-dim text-sm mb-1">
-    Enter your numeric Telegram chat ID so Alerts and Reports are delivered to your chat.
-    To find it: message <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> on Telegram — it replies with your chat ID.
+    Linking is verified: request a one-time code here, then send
+    <code>/link&nbsp;&lt;code&gt;</code> to the bot from the chat that should
+    receive Alerts and Reports. This proves you control that chat before we send
+    to it. Group chats are supported.
   </p>
   {% if owner.telegram_chat_id %}
-    <div class="flash flash-info">Current chat ID: <strong>{{ owner.telegram_chat_id }}</strong></div>
+    <div class="flash flash-info">Linked chat ID: <strong>{{ owner.telegram_chat_id }}</strong></div>
   {% else %}
     <div class="flash flash-info">Not linked yet.</div>
   {% endif %}
-  <form method="post" action="/ui/settings/telegram-chat-id" class="mt-2">
-    <div class="form-group">
-      <label for="telegram_chat_id">Telegram chat ID (numbers only)</label>
-      <input type="text" id="telegram_chat_id" name="telegram_chat_id"
-             pattern="[0-9]+" placeholder="e.g. 123456789"
-             value="{{ owner.telegram_chat_id or '' }}">
+  {% if owner.telegram_link_code %}
+    <div class="flash flash-info">
+      Your pending link code: <strong>{{ owner.telegram_link_code }}</strong>
+      (send <code>/link {{ owner.telegram_link_code }}</code> to the bot from the
+      target chat — expires in 10 minutes).
     </div>
+  {% endif %}
+  <form method="post" action="/ui/settings/telegram-chat-id" class="mt-2">
     <div class="actions">
-      <button type="submit">Save</button>
+      <button type="submit" name="action" value="link">Get link code</button>
       {% if owner.telegram_chat_id %}
-      <button type="submit" name="action" value="remove" class="btn-danger">Remove</button>
+      <button type="submit" name="action" value="remove" class="btn-danger">Unlink</button>
       {% endif %}
     </div>
   </form>
