@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from html import escape
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,11 @@ log = logging.getLogger("tgmonitor.reports")
 
 # How far back each cadence looks.
 PERIOD_DAYS = {"daily": 1, "weekly": 7, "monthly": 30}
+
+
+def _esc(text: str) -> str:
+    """HTML-escape user-controlled text interpolated into parse_mode=HTML (#28)."""
+    return escape(text, quote=True)
 
 
 def _advance_next_run(cadence: str, now: datetime) -> datetime:
@@ -90,7 +96,7 @@ async def render_scheduled_report(session: AsyncSession, user_id: int, cadence: 
         state = "🟢 up" if (latest and latest.success) else "🔴 down"
         worst_str = f"{worst}ms" if worst is not None else "-"
         lines.append(
-            f"• <b>{m.name}</b> — {state} | uptime {uptime:.1f}% | "
+            f"• <b>{_esc(m.name)}</b> — {state} | uptime {uptime:.1f}% | "
             f"{inc_count} incident(s) | worst {worst_str}"
         )
     return "\n".join(lines)
@@ -99,7 +105,7 @@ async def render_scheduled_report(session: AsyncSession, user_id: int, cadence: 
 async def render_post_incident_summary(session: AsyncSession, incident: Incident) -> str:
     """Render the structured follow-up sent after an Incident closes."""
     monitor = await session.get(Monitor, incident.monitor_id)
-    name = monitor.name if monitor else f"#{incident.monitor_id}"
+    name = _esc(monitor.name) if monitor else f"#{incident.monitor_id}"
     # Count failed checks during the incident span.
     end = incident.closed_at or datetime.now(UTC)
     failed = (
@@ -120,7 +126,7 @@ async def render_post_incident_summary(session: AsyncSession, incident: Incident
         f"📋 <b>Post-incident summary</b>\n"
         f"Monitor: <b>{name}</b>\n"
         f"Duration: {minutes} min\n"
-        f"Reason: {incident.open_reason}\n"
+        f"Reason: {_esc(incident.open_reason)}\n"
         f"Failed checks: {failed}"
     )
 
