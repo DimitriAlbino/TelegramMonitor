@@ -42,9 +42,15 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
     # Hashed with argon2 (passlib). Never stored or logged in plaintext.
     password_hash: Mapped[str] = mapped_column(String(255), default="", server_default="")
-    # Telegram chat binding — populated by the account-linking flow (T4). Null
-    # until linked. The Notification Channel resolves to this.
+    # Telegram chat binding — populated by the verified account-linking flow
+    # (#26). Null until linked. The Notification Channel resolves to this.
     telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Ownership-proof challenge code for chat linking (#26): the user requests a
+    # code here, sends ``/link <code>`` from the target chat, and the webhook
+    # binds that chat's id to this User only if the code matches. Null/expired
+    # means no pending link.
+    telegram_link_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    telegram_link_expires_at: Mapped[datetime | None] = mapped_column(UTC_TIMESTAMP, nullable=True)
     # Email verification: an account is inactive until the verification link is
     # clicked. ``is_active`` flips to true on verification (ADR-0001).
     is_active: Mapped[bool] = mapped_column(default=False, server_default=text("false"))

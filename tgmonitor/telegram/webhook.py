@@ -81,14 +81,21 @@ async def telegram_webhook(
         await _handle_start(session, chat_id, arg)
         return {"status": "ok"}
 
+    # /link <code> binds this chat to the account that issued the code (#26).
+    # It runs before the linked-chat check because the chat is not linked yet.
+    if cmd == "link":
+        await _handle_link(session, chat_id, arg)
+        return {"status": "ok"}
+
     # All other commands require a linked chat. Unrecognized chat → "please link".
     user = await _user_for_chat(session, chat_id)
     if user is None:
+        base = get_settings().public_base_url
         await _reply(
             chat_id,
             "I don't recognize this chat. To link your account, go to "
-            f"{get_settings().public_base_url}/ui/settings and enter your "
-            f"Telegram chat ID (it's {chat_id}).",
+            f"{base}/ui/settings and request a link code, then send "
+            "`/link <code>` to me from this chat.",
         )
         return {"status": "ok"}
 
@@ -118,19 +125,66 @@ async def _user_for_chat(session: AsyncSession, chat_id: str) -> User | None:
 
 
 async def _handle_start(session: AsyncSession, chat_id: str, arg: str) -> None:
-    """Handle /start: show help and point to the Settings page.
-
-    The tokenized deep-link binding flow was removed (ADR-0002 superseded).
-    Users now link Telegram via the manual chat-ID field on the Settings page.
-    ``/start`` with any argument is treated the same as bare ``/start``.
-    """
+    """Handle /start: show help and point to the Settings page for linking."""
     base = get_settings().public_base_url
     await _reply(
         chat_id,
         "Welcome to TelegramMonitor!\n\n"
         f"To link this chat to your account, go to {base}/ui/settings and "
-        "enter your Telegram chat ID (yours is below) in the Telegram card.\n\n"
-        f"Your chat ID: {chat_id}\n\n"
+        "request a link code, then send `/link <code>` to me from this chat.\n\n"
         "Once linked, I'll alert you when your monitors go down. "
         "Send /help for the command list.",
+    )
+
+
+async def _handle_link(session: AsyncSession, chat_id: str, code: str) -> None:
+    """Bind this chat to the account that issued ``code`` (#26).
+
+    The user requests a one-time code on the Settings page; sending
+    ``/link <code>`` from the target chat proves the caller controls that chat
+    before alerts/reports are pointed at it. Group/supergroup chats (negative
+    ids) are accepted. The chat_id is unique per account, so a chat already
+    linked elsewhere is reclaimed (the previous owner is unlinked), which is the
+    victim-side path to clear a hijacked binding.
+    """
+    code = code.strip().upper()
+    if not code:
+        await _reply(
+            chat_id,
+            "To link this chat, request a code on the Settings page, then send "
+            "`/link <code>` here.",
+        )
+        return
+
+    from datetime import UTC, datetime
+
+    from tgmonitor.models import User
+
+    user = await session.scalar(select(User).where(User.telegram_link_code == code))
+    now = datetime.now(UTC)
+    if (
+        user is None
+        or user.telegram_link_code != code
+        or user.telegram_link_expires_at is None
+        or user.telegram_link_expires_at < now
+    ):
+        await _reply(chat_id, "That link code is invalid or expired. Request a new one.")
+        return
+
+    # Reclaim: if another account currently owns this chat_id, unlink it first
+    # so delivery cannot split across two accounts. The unique index also
+    # enforces this, but we clear it explicitly to give a clean single owner.
+    existing = await session.scalar(select(User).where(User.telegram_chat_id == chat_id))
+    if existing is not None and existing.id != user.id:
+        existing.telegram_chat_id = None
+
+    user.telegram_chat_id = chat_id
+    # Single-use: clear the code so it cannot bind a second chat.
+    user.telegram_link_code = None
+    user.telegram_link_expires_at = None
+    await session.commit()
+    await _reply(
+        chat_id,
+        "✅ This chat is now linked to your TelegramMonitor account. "
+        "You'll receive alerts and reports here. Send /help for commands.",
     )

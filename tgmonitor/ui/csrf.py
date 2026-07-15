@@ -99,9 +99,7 @@ class OriginCsrfMiddleware(BaseHTTPMiddleware):
                 hosts.add(own.netloc.lower())
             origin = request.headers.get("origin") or request.headers.get("referer")
             if not _origin_matches(origin, hosts):
-                return Response(
-                    "CSRF: invalid origin", status_code=status.HTTP_403_FORBIDDEN
-                )
+                return Response("CSRF: invalid origin", status_code=status.HTTP_403_FORBIDDEN)
         return await call_next(request)
 
 

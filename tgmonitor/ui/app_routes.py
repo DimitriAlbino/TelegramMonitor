@@ -633,61 +633,53 @@ async def set_telegram_chat_id(
     request: Request,
     user: ActiveUserCookie,
     session: Annotated[AsyncSession, Depends(get_session)],
-    telegram_chat_id: Annotated[str, Form()] = "",
-    action: Annotated[str, Form()] = "save",
+    action: Annotated[str, Form()] = "link",
 ) -> Any:
-    """Set or remove the user's Telegram chat ID — the Notification Channel target."""
+    """Manage the user's Telegram chat binding via an ownership proof (#26).
+
+    The chat_id is no longer set by typing a number — that let anyone point
+    their monitors at a victim's chat. Instead the user requests a one-time link
+    code here and sends ``/link <code>`` to the bot from the target chat; the
+    webhook binds that chat's id to this User only if the code matches, proving
+    the caller controls the chat. ``action=remove`` unlinks (and is the
+    victim-side path to reclaim a chat bound elsewhere).
+    """
     owner = await session.get(User, user.id)
     if owner is None:
         raise HTTPException(status_code=404, detail="user not found")
 
     if action == "remove":
         owner.telegram_chat_id = None
+        # Clear any pending link code too.
+        owner.telegram_link_code = None
+        owner.telegram_link_expires_at = None
         await session.commit()
         return _render(
             request,
             "settings.html",
-            {"owner": owner, "error": None, "success": "Telegram chat ID removed."},
+            {"owner": owner, "error": None, "success": "Telegram chat unlinked."},
         )
 
-    chat_id = telegram_chat_id.strip()
-    if not chat_id or not chat_id.isdigit() or len(chat_id) > 20:
-        return _render(
-            request,
-            "settings.html",
-            {
-                "owner": owner,
-                "error": "Chat ID must be numeric (message @userinfobot on Telegram to find yours).",
-                "success": None,
-            },
-        )
+    # Generate a fresh one-time challenge code (10 min window).
+    import secrets as _secrets
+    from datetime import UTC, datetime, timedelta
 
-    owner.telegram_chat_id = chat_id
+    code = _secrets.token_hex(4).upper()  # 8 hex chars, easy to type
+    owner.telegram_link_code = code
+    owner.telegram_link_expires_at = datetime.now(UTC) + timedelta(minutes=10)
     await session.commit()
-
-    # Send one confirmation message to the chat as a cheap mistake/abuse signal.
-    # Delivery failure is non-blocking — the ID is saved regardless.
-    delivery_note = ""
-    try:
-        from tgmonitor.telegram.client import NotificationChannel
-
-        channel = NotificationChannel()
-        sent = await channel.send(
-            chat_id,
-            "This chat is now linked to your TelegramMonitor account. "
-            "If this wasn't you, go to Settings and remove the chat ID.",
-        )
-        if not sent:
-            delivery_note = " Chat ID saved, but the confirmation message could not be delivered — verify the ID is correct."
-    except Exception:
-        delivery_note = " Chat ID saved, but the confirmation message could not be delivered."
-
+    base = get_settings().public_base_url
     return _render(
         request,
         "settings.html",
         {
             "owner": owner,
             "error": None,
-            "success": f"Telegram chat ID saved ({chat_id}).{delivery_note}",
+            "success": (
+                f"To link a chat, send this code to the bot from that chat: "
+                f"/link {code} (expires in 10 minutes). The bot's chat is at "
+                f"{base} — open it, paste the command, and your alerts will "
+                f"come to that chat. Group chats are supported."
+            ),
         },
     )
