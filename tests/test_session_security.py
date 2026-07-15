@@ -167,10 +167,46 @@ async def test_csrf_uses_referer_when_origin_absent(monkeypatch) -> None:
 
 
 class _Settings:
-    """Minimal settings stand-in exposing public_base_url."""
+    """Minimal settings stand-in exposing public_base_url + environment."""
 
-    def __init__(self, public_base_url: str) -> None:
+    def __init__(self, public_base_url: str, environment: str = "development") -> None:
         self.public_base_url = public_base_url
+        self.environment = environment
+
+
+@pytest.mark.asyncio
+async def test_csrf_prod_derived_hosts_exclude_localhost(monkeypatch) -> None:
+    """In production the derived allow-list rejects a localhost Origin (#43).
+
+    With permitted_hosts=None (the production mount), only the public host is
+    allowed — a localhost Origin must 403, while the real public host passes.
+    """
+    from tgmonitor.ui.csrf import OriginCsrfMiddleware
+
+    monkeypatch.setattr(
+        "tgmonitor.config.get_settings",
+        lambda: _Settings("https://prod.example", environment="production"),
+    )
+    mw = OriginCsrfMiddleware(_FakeApp(), permitted_hosts=None)
+
+    # localhost Origin is refused in production.
+    resp = await mw.dispatch(
+        _make_request("POST", "/ui/monitors", "http://localhost:8000"), lambda: None
+    )  # type: ignore
+    assert resp.status_code == 403
+
+    # The real public host still passes.
+    called = False
+
+    async def call_next(_req):
+        nonlocal called
+        called = True
+        return _Resp(200)
+
+    resp = await mw.dispatch(
+        _make_request("POST", "/ui/monitors", "https://prod.example"), call_next
+    )  # type: ignore
+    assert called and resp.status_code == 200
 
 
 # --- session revocation is actually enforced on the cookie path (#30/#44) ---

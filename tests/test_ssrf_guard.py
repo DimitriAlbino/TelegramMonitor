@@ -121,11 +121,13 @@ def test_pin_target_rewrites_hostname_to_validated_ip() -> None:
     orig = ssrf._default_resolver
     ssrf._default_resolver = lambda h: ["93.184.216.34"]
     try:
-        pinned, host_header, sni = http_mod._pin_target("https://example.test:8443/path?q=1")
+        pinned, headers, sni = http_mod._pin_target("https://example.test:8443/path?q=1")
     finally:
         ssrf._default_resolver = orig
     assert pinned == "https://93.184.216.34:8443/path?q=1"
-    assert host_header == "example.test:8443"
+    assert headers is not None
+    assert headers["Host"] == "example.test:8443"
+    assert "Authorization" not in headers  # no userinfo → no auth header
     assert sni == "example.test"
 
 
@@ -187,3 +189,24 @@ async def test_api_content_internal_target_is_blocked() -> None:
     result = await run_api_content_check(cfg, transport)
     assert result.success is False
     assert "blocked" in result.reason
+
+
+def test_pin_target_preserves_basic_auth_credentials() -> None:
+    """Rewriting to the pinned IP keeps URL basic-auth via an Authorization header (#39)."""
+    import base64
+
+    import tgmonitor.executors.http as http_mod
+    from tgmonitor.executors import ssrf
+
+    orig = ssrf._default_resolver
+    ssrf._default_resolver = lambda h: ["93.184.216.34"]
+    try:
+        pinned, headers, sni = http_mod._pin_target("https://user:pass@example.test/x")
+    finally:
+        ssrf._default_resolver = orig
+    assert pinned == "https://93.184.216.34/x"  # userinfo stripped from URL
+    assert headers is not None
+    expected = "Basic " + base64.b64encode(b"user:pass").decode()
+    assert headers["Authorization"] == expected
+    assert headers["Host"] == "example.test"
+    assert sni == "example.test"
