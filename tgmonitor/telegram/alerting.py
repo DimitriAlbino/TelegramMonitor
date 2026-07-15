@@ -13,6 +13,7 @@ in the worker bridge (delivery layer, never the pure state machine).
 from __future__ import annotations
 
 import logging
+from html import escape
 
 from tgmonitor.incidents import Action
 from tgmonitor.models import Monitor, User
@@ -22,20 +23,34 @@ from tgmonitor.worker.alerting import AlertIntent, AlertSink
 log = logging.getLogger("tgmonitor.telegram.alerting")
 
 
+def _esc(text: str) -> str:
+    """HTML-escape user-controlled text interpolated into parse_mode=HTML (#28).
+
+    Telegram's HTML mode parses entities strictly; a stray ``<`` (a Monitor
+    named ``a<b`` or a reason containing a ``body_contains`` keyword like
+    ``<div id="app">``) makes the API reject the message with 400 "can't parse
+    entities", so the Alert never delivers.
+    """
+    return escape(text, quote=True)
+
+
 def format_alert(intent: AlertIntent, monitor_name: str) -> str | None:
     """Format an Alert message for one transition. Returns None for actions
     that produce no Alert (Action.NONE).
 
     One message per transition: opened, recovered, flap start, flap end.
+    User-controlled strings (Monitor name, Result reason) are HTML-escaped (#28).
     """
+    name = _esc(monitor_name)
+    reason = _esc(intent.reason)
     if intent.action is Action.OPEN_INCIDENT:
-        return f"🔴 <b>{monitor_name}</b> is down\n{intent.reason}"
+        return f"🔴 <b>{name}</b> is down\n{reason}"
     if intent.action is Action.CLOSE_INCIDENT:
-        return f"🟢 <b>{monitor_name}</b> recovered\n{intent.reason}"
+        return f"🟢 <b>{name}</b> recovered\n{reason}"
     if intent.action is Action.FLAP_START:
-        return f"🟡 <b>{monitor_name}</b> is flapping — suppressing further alerts"
+        return f"🟡 <b>{name}</b> is flapping — suppressing further alerts"
     if intent.action is Action.FLAP_END:
-        return f"🟢 <b>{monitor_name}</b> stabilized — resuming normal alerting"
+        return f"🟢 <b>{name}</b> stabilized — resuming normal alerting"
     return None
 
 
