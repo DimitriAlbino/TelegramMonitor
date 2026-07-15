@@ -136,21 +136,21 @@ async def apply_transition(
             open_incident.closed_at = datetime.now(UTC)
             open_incident.close_reason = result_reason
             open_incident.outcome = "recovered"
+            # Populate the failed-check count for the summary here (same session,
+            # before the close is committed). summary_sent_at is NOT stamped
+            # here (#21): the sink must actually deliver the summary first; the
+            # sink stamps the flag after a confirmed send. Pre-stamping made the
+            # feature 100% dead (the sink gated on summary_sent_at being null,
+            # so it always skipped, then the flag was committed with no retry).
+            open_incident.failed_check_count = await _count_failed_checks(
+                session, monitor.id, open_incident.opened_at, open_incident.closed_at
+            )
             await session.flush()
             await _maybe_alert(
                 alert_sink,
                 AlertIntent(monitor.id, action, open_incident.id, result_reason),
                 monitor,
             )
-            # Post-incident Summary (ADR-0006 kind #3): a structured follow-up
-            # richer than the one-line recovery Alert, sent after the recovery
-            # Alert via the same sink. Only sent once (summary_sent_at guard).
-            if open_incident.summary_sent_at is None and alert_sink is not None:
-                open_incident.failed_check_count = await _count_failed_checks(
-                    session, monitor.id, open_incident.opened_at, open_incident.closed_at
-                )
-                open_incident.summary_sent_at = datetime.now(UTC)
-                await session.flush()
     elif action is Action.FLAP_START:
         await _maybe_alert(
             alert_sink, AlertIntent(monitor.id, action, None, "flapping detected"), monitor
