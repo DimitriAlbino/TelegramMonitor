@@ -82,6 +82,15 @@ def create_app() -> FastAPI:
     # Serve static assets (CSS) and mount the templates directory.
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
+    # Root redirect: logged-out → login, logged-in → dashboard. Fixes the bare
+    # 404 at "/" — the entry point for browser users.
+    @app.get("/", include_in_schema=False)
+    async def root_redirect(request: Request) -> RedirectResponse:
+        token = request.cookies.get(COOKIE_NAME)
+        if token and decode_token(token, expected_purpose="session"):
+            return RedirectResponse("/ui/monitors", status_code=302)
+        return RedirectResponse("/ui/login", status_code=302)
+
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, object]:
         """Liveness probe for an external uptime monitor.
