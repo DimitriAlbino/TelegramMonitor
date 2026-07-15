@@ -14,11 +14,12 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 ### Deployment
 
-Our live instance runs at **`telegrammonitor.com`**. The full deployment
-reference — SSH alias, server specs, Telegram bot token, owner chat id, webhook
-secret, generated secrets, and the step-by-step runbook — lives in a
-**git-ignored** file at `.deploy/local-deployment.md`. That file is the single
-source of truth for deploying our instance; it is intentionally not committed
-(real credentials must not enter version control). Read it before any
-deployment action. If you don't see it, ask the operator — do not invent
-values. See `.deploy/local-deployment.md`.
+Our live instance runs at **`telegrammonitor.com`**. Deployment is standard
+Docker Compose (see the README "Run locally" section and `docker-compose.yml`):
+the worker applies migrations on boot, Caddy terminates TLS in front of the api,
+and the Telegram webhook points at `/telegram/webhook`.
+
+Real deployment credentials (SSH alias, bot token, generated secrets) are
+**never committed**. They live only on the operator's machine and the server.
+If you need a value to perform a deployment action, ask the operator — do not
+invent values or look for them in this repo.

@@ -31,9 +31,12 @@ the chat.
 - **Answers you on demand.** Send `/status` to the bot and get the live state of every Monitor
   instantly — no app to open. `/mute`, `/unmute`, `/incidents`, and `/help` round out the
   command surface.
-- **Self-heals and stays honest.** The engine separates *liveness* from *freshness* and the
-  incident state machine is a pure function — debounce, recovery, and flapping suppression are
-  fully unit-tested.
+- **Stays honest and restarts cleanly.** The engine separates *liveness* from *freshness*
+  (the `/healthz` probe reports DB reachability separately from probe volume), and scheduling
+  state lives in the database so a worker restart resumes exactly where it left off with no
+  double-fire window. Containers run under `restart: unless-stopped`. The incident state
+  machine is a pure function — debounce, recovery, and flapping suppression are fully
+  unit-tested.
 - **Publishes a public status page.** Opt any subset of your Monitors into a public,
   auto-generated status page at a stable URL (`/status/{slug}`) — read-only, cached, with
   incident history derived from the automated record.
@@ -127,12 +130,15 @@ email (links printed to the logs in dev), and start adding monitors.
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev]"        # or: uv sync --extra dev (uses the committed uv.lock)
 pytest                         # unit tests (executors, state machine, auth, classifiers)
 mypy tgmonitor                 # typecheck
 ruff check && ruff format --check   # lint
 alembic upgrade head --sql     # emit migration SQL offline (no DB needed)
 ```
+
+Dependencies are pinned in `uv.lock` so the deployed image is reproducible.
+Regenerate it with `uv lock` after changing `pyproject.toml`.
 
 ## Demo
 
