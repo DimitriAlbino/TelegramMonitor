@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tgmonitor.incident_model import Incident
@@ -90,6 +90,14 @@ async def apply_transition(
     logged and swallowed so the engine keeps running.
     """
     th = _thresholds_for(monitor)
+    # Serialize concurrent transitions for one Monitor (#32). With the 30s
+    # interval floor and timeouts up to 60s, two Checks for the same Monitor can
+    # overlap; without a lock both read the same consecutive_failures and write
+    # back the same incremented value, losing a failure. A transaction-scoped
+    # Postgres advisory lock keyed on the monitor id makes the read-modify-write
+    # atomic per monitor (released automatically at COMMIT/ROLLBACK). The hash
+    # scheme maps monitor ids into pg_advisory_xact_lock's bigint range safely.
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": monitor.id})
     state = _state_from(monitor)
     state.recent_opens = await _recent_opens(session, monitor.id, th.flap_window_s)
     now = datetime.now(UTC).timestamp()
