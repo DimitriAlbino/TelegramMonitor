@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tgmonitor.auth.tokens import decode_token
@@ -23,10 +23,15 @@ COOKIE_NAME = "tgm_session"
 
 
 async def get_current_user_cookie(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     tgm_session: Annotated[str | None, Cookie()] = None,
 ) -> User:
-    """Resolve the session cookie to a User, or 401."""
+    """Resolve the session cookie to a User, or 401.
+
+    Stores the resolved user on ``request.state.user`` so template renderers can
+    show the nav without the route passing it explicitly.
+    """
     if tgm_session is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -41,6 +46,7 @@ async def get_current_user_cookie(
     user = await session.get(User, int(payload.sub))
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
+    request.state.user = user
     return user
 
 
