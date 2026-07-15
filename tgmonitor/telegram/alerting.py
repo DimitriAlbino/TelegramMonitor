@@ -13,6 +13,7 @@ in the worker bridge (delivery layer, never the pure state machine).
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from html import escape
 
 from tgmonitor.incidents import Action
@@ -120,6 +121,8 @@ def make_alert_sink(
 # worker's tick loop when the quiet window ends (T6's quiet-hours flusher).
 import asyncio  # noqa: E402
 
+from tgmonitor.telegram.quiet_hours import is_in_quiet_window  # noqa: E402
+
 _digest_lock = asyncio.Lock()
 _digests: dict[int, list[str]] = {}
 
@@ -129,7 +132,74 @@ def _queue_digest(user_id: int, text: str) -> None:
     _digests.setdefault(user_id, []).append(text)
 
 
+def queued_user_ids() -> list[int]:
+    """Snapshot of user ids with pending deferred digests (for the flusher)."""
+    return list(_digests.keys())
+
+
 async def flush_digest(user_id: int) -> list[str]:
     """Pop and return the user's queued digest messages. Empty if none."""
     async with _digest_lock:
         return _digests.pop(user_id, [])
+
+
+async def flush_due_digests(
+    channel: NotificationChannel | None = None,
+    *,
+    now_utc: datetime | None = None,
+    user_lookup: "UserLookup | None" = None,
+) -> int:
+    """Deliver deferred (non-critical) digests whose quiet window has ended.
+
+    Called from the worker's tick loop each tick (#20): for every user with a
+    queued digest, if they are no longer inside their quiet window, pop the
+    queued messages and send them as one combined digest. Returns the number of
+    digests delivered. A user still inside their window is left queued (no drop).
+
+    The queue is bounded by delivery — once flushed the entry is removed, so it
+    cannot grow unbounded across the window.
+
+    ``now_utc`` and ``user_lookup`` are injectable so the decision is testable
+    without the DB or a wall clock (defaults: real time + a DB-backed lookup).
+    """
+    ch = channel or NotificationChannel()
+    clock = now_utc if now_utc is not None else datetime.now(UTC)
+    lookup = user_lookup or _DbUserLookup()
+    delivered = 0
+    for user_id in queued_user_ids():
+        messages = await flush_digest(user_id)
+        if not messages:
+            continue
+        user = await lookup.get(user_id)
+        # Re-check the window at delivery time: a user may still be inside it
+        # (queued by a different tick). Leave their messages queued in that case
+        # rather than dropping or double-sending.
+        if user is not None and is_in_quiet_window(
+            clock, user.quiet_hours_start, user.quiet_hours_end, user.quiet_hours_tz
+        ):
+            _digests.setdefault(user_id, []).extend(messages)  # re-queue, skip
+            continue
+        chat_id = user.telegram_chat_id if user else None
+        if not chat_id:
+            continue  # no linked chat; drop (the alert was non-critical)
+        body = "📨 Quiet-hours digest (deferred alerts):\n\n" + "\n\n".join(messages)
+        if await ch.send(chat_id, body):
+            delivered += 1
+    return delivered
+
+
+# A user-lookup seam so the flusher is testable without the DB. The default
+# implementation reads the User row from Postgres.
+class UserLookup:
+    """Abstract user lookup for the digest flusher."""
+
+    async def get(self, user_id: int) -> User | None:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+
+class _DbUserLookup(UserLookup):
+    async def get(self, user_id: int) -> User | None:
+        from tgmonitor.db import session_factory as sf
+
+        async with sf()() as session:
+            return await session.get(User, user_id)
