@@ -13,11 +13,18 @@ delivery-suppression flag (Checks keep running, Incidents tracked).
 
 from __future__ import annotations
 
+from html import escape
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tgmonitor.incident_model import Incident
 from tgmonitor.models import Check, Monitor
+
+
+def _esc(text: str) -> str:
+    """HTML-escape user-controlled text interpolated into parse_mode=HTML (#28)."""
+    return escape(text, quote=True)
 
 HELP_TEXT = (
     "<b>TelegramMonitor commands</b>\n\n"
@@ -80,7 +87,7 @@ async def cmd_status(session: AsyncSession, user_id: int) -> str:
     lines = [f"🔴 {len(down)}/{len(monitors)} monitor(s) are down:"]
     for m in down:
         c = latest[m.id]
-        lines.append(f"• <b>{m.name}</b> — {c.reason}")
+        lines.append(f"• <b>{_esc(m.name)}</b> — {_esc(c.reason)}")
     return "\n".join(lines)
 
 
@@ -109,7 +116,7 @@ async def cmd_mute(session: AsyncSession, user_id: int, arg: str) -> str:
     for m in matches:
         m.muted = True
     await session.commit()
-    names = ", ".join(m.name for m in matches)
+    names = ", ".join(_esc(m.name) for m in matches)
     return f"🔇 Muted: {names}"
 
 
@@ -137,7 +144,7 @@ async def cmd_unmute(session: AsyncSession, user_id: int, arg: str) -> str:
     for m in matches:
         m.muted = False
     await session.commit()
-    names = ", ".join(m.name for m in matches)
+    names = ", ".join(_esc(m.name) for m in matches)
     return f"🔔 Unmuted: {names}"
 
 
@@ -163,9 +170,10 @@ async def cmd_incidents(session: AsyncSession, user_id: int) -> str:
     for inc in incidents:
         state = "🔴 open" if inc.closed_at is None else "🟢 closed"
         mon = await session.get(Monitor, inc.monitor_id)
-        name = mon.name if mon else f"#{inc.monitor_id}"
+        name = _esc(mon.name) if mon else f"#{inc.monitor_id}"
         lines.append(
-            f"• {state} <b>{name}</b> — {inc.open_reason} ({inc.opened_at:%Y-%m-%d %H:%M})"
+            f"• {state} <b>{name}</b> — {_esc(inc.open_reason)} "
+            f"({inc.opened_at:%Y-%m-%d %H:%M})"
         )
     return "\n".join(lines)
 

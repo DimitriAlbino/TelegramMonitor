@@ -46,6 +46,32 @@ def test_format_none_action_returns_none() -> None:
     assert format_alert(_intent(Action.NONE), "X") is None
 
 
+def test_format_escapes_markup_in_monitor_name() -> None:
+    """A monitor name with HTML markup must not break parse_mode=HTML (#28)."""
+    msg = format_alert(_intent(Action.OPEN_INCIDENT, "HTTP 500"), "a<b")
+    assert msg is not None
+    assert "a&lt;b" in msg
+    assert "a<b>" not in msg  # the raw <b> would open an entity
+
+
+def test_format_escapes_markup_in_reason() -> None:
+    """A reason containing markup (e.g. a body_contains keyword) must be escaped."""
+    msg = format_alert(_intent(Action.OPEN_INCIDENT, '<div id="app">'), "Billing")
+    assert msg is not None
+    assert "<div" not in msg
+    assert "&lt;div" in msg
+
+
+def test_escape_helper() -> None:
+    """The shared HTML escape helper covers the characters Telegram parses."""
+    from tgmonitor.telegram.alerting import _esc
+
+    assert _esc("a<b") == "a&lt;b"
+    assert _esc("a>b") == "a&gt;b"
+    assert _esc("a&b") == "a&amp;b"
+    assert _esc('<div id="x">') == "&lt;div id=&quot;x&quot;&gt;"
+
+
 def test_extract_command_basic() -> None:
     assert _extract_command("/start abc123") == ("start", "abc123")
 
