@@ -7,7 +7,7 @@ name = "tgmonitor"
 version = "0.1.0"
 description = "Hosted monitoring SaaS with Telegram alerts"
 requires-python = ">=3.12"
-license = { text = "TBD" }
+license = { text = "MIT" }
 readme = "README.md"
 dependencies = [
     "fastapi>=0.115",

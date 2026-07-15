@@ -1,15 +1,17 @@
-"""Telegram webhook receiver + account-linking flow (ADR-0012).
+"""Telegram webhook receiver (ADR-0012).
 
 ``POST /telegram/webhook`` receives Updates Telegram pushes. The handler:
 1. Validates the ``X-Telegram-Bot-Api-Secret-Token`` header (rejects spoofing).
-2. Routes the command text (``/start [token]`` for linking; other commands land
-   in T6).
+2. Routes the command text (``/status``, ``/mute``, ``/unmute``,
+   ``/incidents``, ``/help``).
 3. Is idempotent — Telegram redelivers on non-2xx, so handlers must be safe to
-   receive twice (binding twice to the same chat is a no-op update).
+   receive twice.
 
-Account linking (ADR-0002): the web UI generates a one-time deep-link token; the
-user opens the bot via ``https://t.me/<bot>?start=<token>``; ``/start <token>``
-binds the incoming ``chat_id`` to the User who generated the token.
+Account linking is done manually: the user enters their Telegram chat ID on the
+Settings page (``/ui/settings``). The tokenized ``/start <token>`` flow was
+removed (ADR-0002 superseded). ``/start`` now shows help and the user's chat ID,
+pointing them to the Settings page. An unrecognized ``chat_id`` on any command
+gets a "please link at /ui/settings" reply.
 """
 
 from __future__ import annotations
