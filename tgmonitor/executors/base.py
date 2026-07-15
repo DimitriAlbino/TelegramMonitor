@@ -42,6 +42,9 @@ class CheckConfig:
     follow_redirects: bool = False
     # TCP knobs (ignored for http).
     tcp_timeout_s: float = 5.0
+    # api_content knobs (dot-notation JSON field path + alarm keyword).
+    json_field_path: str | None = None
+    json_keyword: str | None = None
 
 
 @runtime_checkable
@@ -81,6 +84,10 @@ async def run_check(config: CheckConfig, transport: Transport) -> Result:
         from tgmonitor.executors.tcp import run_tcp_check
 
         return await run_tcp_check(config, transport)
+    if config.check_kind == "api_content":
+        from tgmonitor.executors.api_content import run_api_content_check
+
+        return await run_api_content_check(config, transport)
     return Result(
         success=False,
         reason=f"unsupported check_kind {config.check_kind!r}",

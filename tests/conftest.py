@@ -62,3 +62,21 @@ def http_config(
         max_latency_ms=max_latency_ms,
         timeout_s=timeout_s,
     )
+
+
+def api_content_config(
+    target: str = "https://api.example.com/status",
+    *,
+    monitor_id: int = 1,
+    json_field_path: str = "mode",
+    json_keyword: str = "stale",
+    timeout_s: float = 10.0,
+) -> CheckConfig:
+    return CheckConfig(
+        monitor_id=monitor_id,
+        check_kind="api_content",
+        target=target,
+        json_field_path=json_field_path,
+        json_keyword=json_keyword,
+        timeout_s=timeout_s,
+    )

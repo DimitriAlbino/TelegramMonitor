@@ -10,7 +10,7 @@ import dataclasses
 
 import pytest
 
-from tgmonitor.results import Result, classify_http
+from tgmonitor.results import Result, classify_api_content, classify_http
 
 
 def test_status_match_success() -> None:
@@ -57,3 +57,51 @@ def test_result_is_frozen() -> None:
     # FrozenInstanceError is raised on mutation of a frozen dataclass.
     with pytest.raises(dataclasses.FrozenInstanceError):
         r.success = False  # type: ignore[misc]
+
+
+# --- classify_api_content ---
+
+
+def test_api_content_keyword_present_failure() -> None:
+    r = classify_api_content('{"mode": "stale"}', "mode", "stale")
+    assert r.success is False
+    assert "stale" in r.reason
+
+
+def test_api_content_keyword_absent_success() -> None:
+    r = classify_api_content('{"mode": "live"}', "mode", "stale")
+    assert r.success is True
+
+
+def test_api_content_non_json_failure() -> None:
+    r = classify_api_content("not json", "mode", "stale")
+    assert r.success is False
+    assert "not valid JSON" in r.reason
+
+
+def test_api_content_missing_field_failure() -> None:
+    r = classify_api_content('{"other": 1}', "mode", "stale")
+    assert r.success is False
+    assert "not found" in r.reason
+
+
+def test_api_content_null_field_failure() -> None:
+    r = classify_api_content('{"mode": null}', "mode", "stale")
+    assert r.success is False
+    assert "null" in r.reason
+
+
+def test_api_content_nested_dot_path() -> None:
+    r = classify_api_content('{"data": {"status": "ok"}}', "data.status", "stale")
+    assert r.success is True
+
+
+def test_api_content_nested_missing_intermediate() -> None:
+    r = classify_api_content('{"x": 1}', "data.status", "stale")
+    assert r.success is False
+    assert "data" in r.reason
+
+
+def test_api_content_substring_match() -> None:
+    r = classify_api_content('{"mode": "system_stale_mode"}', "mode", "stale")
+    assert r.success is False

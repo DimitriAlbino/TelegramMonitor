@@ -13,6 +13,7 @@
       <select id="check_kind" name="check_kind" {{ 'disabled' if m }}>
         <option value="http" {{ 'selected' if not m or m.check_kind == 'http' }}>HTTP (GET a URL)</option>
         <option value="tcp" {{ 'selected' if m and m.check_kind == 'tcp' }}>TCP (open host:port)</option>
+        <option value="api_content" {{ 'selected' if m and m.check_kind == 'api_content' }}>API content (JSON field + keyword)</option>
       </select>
       {% if m %}<p class="text-dim text-sm mt-1">Kind cannot be changed after creation.</p>{% endif %}
     </div>
@@ -61,6 +62,18 @@
       </div>
     </div>
 
+    <div id="api-fields" style="{{ '' if m and m.check_kind == 'api_content' else 'display:none' }}">
+      <p class="text-dim text-sm mb-1">GETs a JSON URL and checks a field by dot-path. Fails when the field value contains the alarm keyword.</p>
+      <div class="form-group">
+        <label for="json_field_path">JSON field path (dot-notation)</label>
+        <input type="text" id="json_field_path" name="json_field_path" value="{{ m.config.json_field_path if m and m.config.get('json_field_path') else '' }}" placeholder="e.g. mode or data.status">
+      </div>
+      <div class="form-group">
+        <label for="json_keyword">Alarm keyword (check fails if the field contains this)</label>
+        <input type="text" id="json_keyword" name="json_keyword" value="{{ m.config.json_keyword if m and m.config.get('json_keyword') else '' }}" placeholder="e.g. stale">
+      </div>
+    </div>
+
     <div class="form-checks">
       <label><input type="checkbox" name="critical" value="true" {{ 'checked' if m and m.critical }}> Critical (bypasses quiet hours)</label>
       <label><input type="checkbox" name="show_on_status_page" value="true" {{ 'checked' if m and m.show_on_status_page }}> Show on status page</label>
@@ -74,8 +87,13 @@
 </div>
 
 <script>
-document.getElementById('check_kind').addEventListener('change', function() {
-  document.getElementById('http-fields').style.display = this.value === 'http' ? '' : 'none';
-});
+var kindSelect = document.getElementById('check_kind');
+function toggleKindFields() {
+  var kind = kindSelect.value;
+  document.getElementById('http-fields').style.display = kind === 'http' ? '' : 'none';
+  document.getElementById('api-fields').style.display = kind === 'api_content' ? '' : 'none';
+}
+kindSelect.addEventListener('change', toggleKindFields);
+toggleKindFields();
 </script>
 {% endblock %}
