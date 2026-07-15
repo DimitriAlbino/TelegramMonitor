@@ -188,6 +188,48 @@ def test_flapping_failure_resets_stabilization() -> None:
     assert t.action is Action.NONE
 
 
+# --- Flapping is not a permanent trap (#27) ---
+
+
+def test_flapping_then_hard_down_opens_incident() -> None:
+    """A flapping monitor that then fails persistently must open an Incident.
+
+    While flapping, ``flap_hard_down`` consecutive failures transition out of
+    flapping into a real down state and page (#27) — flapping must not be a
+    permanent silence trap.
+    """
+    th = thresholds(failure_threshold=3, recovery_threshold=2, flap_hard_down=5)
+    s = MonitorState(status="flapping")
+    action = Action.NONE
+    for _ in range(th.flap_hard_down):
+        t = step(s, FAIL, th, now=T0)
+        s, action = t.state, t.action
+    assert action is Action.OPEN_INCIDENT
+    assert s.status == "down"
+
+
+def test_flapping_failure_below_hard_down_stays_flapping() -> None:
+    """Failures during flapping below the hard-down threshold stay silent."""
+    th = thresholds(flap_hard_down=5)
+    s = MonitorState(status="flapping")
+    for _ in range(th.flap_hard_down - 1):
+        t = step(s, FAIL, th, now=T0)
+        s = t.state
+        assert t.action is Action.NONE
+        assert s.status == "flapping"
+
+
+def test_flapping_recovery_still_ends_flapping() -> None:
+    """The normal stabilization exit still works alongside the hard-down exit."""
+    th = thresholds(flap_stabilization=3, flap_hard_down=5)
+    s = MonitorState(status="flapping")
+    s = step(s, OK, th, now=T0).state
+    s = step(s, OK, th, now=T0).state
+    t = step(s, OK, th, now=T0)
+    assert t.action is Action.FLAP_END
+    assert t.state.status == "ok"
+
+
 def test_opens_outside_window_do_not_count_toward_flapping() -> None:
     """An open older than flap_window_s is pruned and doesn't contribute."""
     th = thresholds(failure_threshold=1, recovery_threshold=1, flap_opens=3, flap_window_s=600.0)
