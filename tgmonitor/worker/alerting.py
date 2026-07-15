@@ -98,6 +98,16 @@ async def apply_transition(
     # atomic per monitor (released automatically at COMMIT/ROLLBACK). The hash
     # scheme maps monitor ids into pg_advisory_xact_lock's bigint range safely.
     await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": monitor.id})
+    # Re-read the counters *under* the lock (#32). The Monitor row was loaded by
+    # the engine before the lock was taken, so its counters may be stale: an
+    # overlapping Check for this Monitor could have committed a new value while
+    # we waited on the lock. Refreshing here makes the read-modify-write truly
+    # atomic — without it the lock serializes the writes but both still start
+    # from the same pre-lock value and one increment is lost.
+    await session.refresh(
+        monitor,
+        attribute_names=["consecutive_failures", "consecutive_successes", "incident_status"],
+    )
     state = _state_from(monitor)
     state.recent_opens = await _recent_opens(session, monitor.id, th.flap_window_s)
     now = datetime.now(UTC).timestamp()

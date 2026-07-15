@@ -421,8 +421,9 @@ async def send_test_alert(
             "no linked Telegram chat; set your chat ID on the Settings page first",
         )
     from tgmonitor.telegram.client import NotificationChannel
+    from tgmonitor.telegram.html import esc_html
 
     channel = NotificationChannel()
-    text = f"🧪 <b>{monitor.name}</b> — this is a test alert. Delivery is working."
+    text = f"🧪 <b>{esc_html(monitor.name)}</b> — this is a test alert. Delivery is working."
     delivered = await channel.send(chat_id, text)
     return {"delivered": delivered, "monitor_id": monitor.id}

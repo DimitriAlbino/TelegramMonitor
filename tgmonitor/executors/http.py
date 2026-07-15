@@ -36,14 +36,21 @@ class HttpTransport:
     """
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+        # Ensure the SSRF re-validation hook is attached whether the client is
+        # injected (the pooled, long-lived client the worker engine builds) or
+        # created per-request below. Without this the redirect re-check is dead
+        # code on the production path, because the engine passes its own client
+        # and the `or httpx.AsyncClient(...)` branch is never taken (#22).
+        if client is not None:
+            _register_ssrf_hook(client)
         self._client = client
 
     async def request(
         self, url: str, *, timeout_s: float, follow_redirects: bool = False
     ) -> tuple[int, str]:
-        # SSRF guard (#22): refuse internal targets. The request hook below
-        # re-checks redirect targets; this pre-check covers the initial URL and
-        # gives a clean failure for blocked literals before opening a client.
+        # SSRF guard (#22): refuse internal targets. The request hook re-checks
+        # redirect targets; this pre-check covers the initial URL and gives a
+        # clean failure for blocked literals before opening a client.
         from tgmonitor.executors.ssrf import assert_safe_destination
 
         assert_safe_destination(url)
@@ -59,6 +66,20 @@ class HttpTransport:
         finally:
             if owned:
                 await client.aclose()
+
+
+def _register_ssrf_hook(client: httpx.AsyncClient) -> None:
+    """Attach :func:`_ssrf_request_hook` to ``client`` idempotently (#22).
+
+    Used for injected clients (the engine's pooled client) so redirect targets
+    are re-validated on the production path, not only on the per-request client.
+    """
+    hooks = dict(client.event_hooks)
+    request_hooks = list(hooks.get("request", []))
+    if _ssrf_request_hook not in request_hooks:
+        request_hooks.append(_ssrf_request_hook)
+    hooks["request"] = request_hooks
+    client.event_hooks = hooks
 
 
 async def _ssrf_request_hook(request: httpx.Request) -> None:
