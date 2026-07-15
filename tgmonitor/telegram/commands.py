@@ -13,18 +13,15 @@ delivery-suppression flag (Checks keep running, Incidents tracked).
 
 from __future__ import annotations
 
-from html import escape
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tgmonitor.incident_model import Incident
 from tgmonitor.models import Check, Monitor
+from tgmonitor.telegram.html import esc_html
 
-
-def _esc(text: str) -> str:
-    """HTML-escape user-controlled text interpolated into parse_mode=HTML (#28)."""
-    return escape(text, quote=True)
+# Shared HTML-escape helper for parse_mode=HTML messages (#28).
+_esc = esc_html
 
 
 HELP_TEXT = (

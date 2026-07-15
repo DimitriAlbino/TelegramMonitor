@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, time, timedelta
-from html import escape
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, text
@@ -22,16 +21,15 @@ from tgmonitor.incident_model import Incident
 from tgmonitor.models import Check, Monitor
 from tgmonitor.report_model import Report
 from tgmonitor.telegram.client import NotificationChannel
+from tgmonitor.telegram.html import esc_html
 
 log = logging.getLogger("tgmonitor.reports")
 
 # How far back each cadence looks.
 PERIOD_DAYS = {"daily": 1, "weekly": 7, "monthly": 30}
 
-
-def _esc(text: str) -> str:
-    """HTML-escape user-controlled text interpolated into parse_mode=HTML (#28)."""
-    return escape(text, quote=True)
+# Shared HTML-escape helper for parse_mode=HTML messages (#28).
+_esc = esc_html
 
 
 def next_run_for_delivery_time(
@@ -43,11 +41,11 @@ def next_run_for_delivery_time(
 ) -> datetime:
     """Compute the next run_at for a scheduled Report (#31).
 
-    The report must fire at ``delivery_time`` in ``timezone`` (not at
-    ``now + cadence``, which drifted later each tick). This finds the next
-    wall-clock occurrence of ``delivery_time`` strictly after ``now``; if that
-    occurrence is in the past relative to the cadence (already passed today),
-    it advances by the cadence until it is in the future.
+    The report must fire at ``delivery_time`` in ``timezone`` on its cadence
+    (not at ``now + cadence``, which drifted later each tick). This finds the
+    next wall-clock occurrence of ``delivery_time`` strictly after ``now``,
+    stepping by ``cadence_days`` so a weekly report's next run is a week after
+    the just-fired time (not the next calendar day).
 
     Malformed ``delivery_time`` or an unknown timezone degrade gracefully to
     ``now + cadence`` so a bad value never blocks all reports.
@@ -62,11 +60,13 @@ def next_run_for_delivery_time(
         tz = ZoneInfo(timezone) if timezone else UTC
     except (KeyError, ValueError):
         tz = UTC
-    # Build today's occurrence in the configured tz, then convert to UTC.
+    # Build today's occurrence in the configured tz, then advance by the cadence
+    # until it is strictly in the future. For daily this is today (if still
+    # upcoming) or tomorrow; for weekly/monthly it lands cadence_days out.
     today_local = base.astimezone(tz)
     candidate = today_local.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
-    if candidate <= base:
-        candidate += timedelta(days=1)
+    while candidate <= base:
+        candidate += timedelta(days=cadence_days)
     return candidate.astimezone(UTC)
 
 

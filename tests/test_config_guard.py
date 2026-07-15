@@ -34,6 +34,12 @@ def test_production_rejects_default_postgres_password() -> None:
         validate_production_secrets(s)
 
 
+def test_production_rejects_blank_postgres_password() -> None:
+    s = _settings(environment="production", postgres_password="")
+    with pytest.raises(RuntimeError, match="POSTGRES_PASSWORD"):
+        validate_production_secrets(s)
+
+
 def test_production_accepts_real_secrets() -> None:
     s = _settings(environment="production")
     validate_production_secrets(s)  # no raise

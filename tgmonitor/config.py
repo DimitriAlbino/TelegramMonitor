@@ -139,8 +139,8 @@ def validate_production_secrets(settings: Settings) -> None:
     problems: list[str] = []
     if not settings.secret_key or settings.secret_key == DEFAULT_SECRET_KEY:
         problems.append("SECRET_KEY is unset or still the placeholder default")
-    if settings.postgres_password == DEFAULT_POSTGRES_PASSWORD:
-        problems.append("POSTGRES_PASSWORD is still the placeholder default")
+    if not settings.postgres_password or settings.postgres_password == DEFAULT_POSTGRES_PASSWORD:
+        problems.append("POSTGRES_PASSWORD is unset or still the placeholder default")
     if problems:
         raise RuntimeError(
             "Refusing to start in production with insecure defaults: "
