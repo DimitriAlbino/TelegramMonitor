@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     auth_rate_window_s: int = Field(default=300)
     auth_rate_max_per_ip: int = Field(default=20)
     auth_rate_max_per_email: int = Field(default=10)
+    # Trust X-Forwarded-For from the reverse proxy for client-IP rate limiting
+    # (#29). Only enable when the deploy genuinely sits behind a proxy we
+    # control (Caddy), so the header cannot be spoofed by arbitrary clients.
+    trust_proxy_headers: bool = Field(default=False)
     # Where the web UI lives, for building verification/reset links.
     public_base_url: str = Field(default="http://localhost:8000")
 
