@@ -197,3 +197,19 @@ async def test_queue_is_bounded_per_user() -> None:
     # Oldest dropped: the newest message is retained, the very first is gone.
     assert q[-1] == f"msg-{alerting.MAX_QUEUED_PER_USER + 49}"
     assert "msg-0" not in q
+
+
+async def test_chunking_measures_utf16_for_emoji_heavy_body() -> None:
+    """Chunk budget uses UTF-16 units so emoji-heavy digests stay deliverable (#40)."""
+    # Each message is emoji-heavy: 200 emoji ≈ 400 UTF-16 units but len()==200.
+    alerting._digests[1] = ["🔴" * 200 for _ in range(30)]
+    ch = _FakeChannel()
+    n = await alerting.flush_due_digests(
+        channel=ch,
+        now_utc=datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
+        user_lookup=_FakeLookup(_FakeUser()),
+    )
+    assert n == 1
+    # Every sent body must fit Telegram's 4096 UTF-16-unit limit.
+    for _, body in ch.sent:
+        assert len(body.encode("utf-16-le")) // 2 <= alerting.TELEGRAM_MAX_CHARS

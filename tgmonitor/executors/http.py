@@ -53,8 +53,7 @@ class HttpTransport:
             logical = url  # hostname-based URL; redirects resolve against this
             resp: httpx.Response | None = None
             for _hop in range(MAX_REDIRECTS + 1):
-                pinned_url, host_header, sni = _pin_target(logical)
-                headers = {"Host": host_header} if host_header else None
+                pinned_url, headers, sni = _pin_target(logical)
                 extensions = {"sni_hostname": sni} if sni else None
                 resp = await client.get(
                     pinned_url,
@@ -74,14 +73,16 @@ class HttpTransport:
                 await client.aclose()
 
 
-def _pin_target(url: str) -> tuple[str, str | None, str | None]:
-    """Return ``(request_url, host_header, sni_hostname)`` for an SSRF-safe GET.
+def _pin_target(url: str) -> tuple[str, dict[str, str] | None, str | None]:
+    """Return ``(request_url, headers, sni_hostname)`` for an SSRF-safe GET.
 
     Validates the destination and, for a hostname, rewrites the URL to the vetted
-    IP while returning the ``Host`` header and SNI hostname to preserve routing
-    and TLS. Raises :class:`DestinationBlocked` for an internal destination. An
-    IP literal is validated and used as-is; an unresolvable hostname is left
-    untouched (it will fail at connect).
+    IP while returning the headers (``Host``, plus a reconstructed
+    ``Authorization`` if the URL carried basic-auth userinfo — which the rewrite
+    strips) and SNI hostname to preserve routing, credentials, and TLS. Raises
+    :class:`DestinationBlocked` for an internal destination. An IP literal is
+    validated and used as-is; an unresolvable hostname is left untouched (it will
+    fail at connect). For the pass-through cases httpx handles any URL userinfo.
     """
     from tgmonitor.executors.ssrf import DestinationBlocked, is_blocked_ip, pick_safe_ip
 
@@ -107,8 +108,15 @@ def _pin_target(url: str) -> tuple[str, str | None, str | None]:
     if parsed.port:
         ip_netloc = f"{ip_netloc}:{parsed.port}"
     pinned_url = parsed._replace(netloc=ip_netloc).geturl()
-    host_header = f"{host}:{parsed.port}" if parsed.port else host
-    return pinned_url, host_header, host
+    headers = {"Host": f"{host}:{parsed.port}" if parsed.port else host}
+    # Rewriting netloc to the IP drops any user:pass@ userinfo; reconstruct the
+    # basic-auth header so credential-bearing targets keep working.
+    if parsed.username is not None:
+        import base64
+
+        creds = f"{parsed.username}:{parsed.password or ''}".encode()
+        headers["Authorization"] = "Basic " + base64.b64encode(creds).decode()
+    return pinned_url, headers, host
 
 
 async def run_http_check(config: CheckConfig, transport: Transport) -> Result:

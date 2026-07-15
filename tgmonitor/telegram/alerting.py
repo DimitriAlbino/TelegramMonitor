@@ -158,25 +158,45 @@ def _queue_digest(user_id: int, text: str) -> None:
         )
 
 
+def _tg_len(s: str) -> int:
+    """Length as Telegram counts it: UTF-16 code units (#40).
+
+    Telegram's 4096 limit is in UTF-16 units, so an emoji (astral char) counts as
+    2, not 1. Measuring with ``len`` would under-count an emoji-heavy body and let
+    it slip over the real limit.
+    """
+    return len(s.encode("utf-16-le")) // 2
+
+
+def _truncate_tg(s: str, budget: int) -> str:
+    """Truncate ``s`` to at most ``budget`` UTF-16 units, ending with an ellipsis."""
+    if _tg_len(s) <= budget:
+        return s
+    s = s[: budget - 1]
+    while _tg_len(s) > budget - 1:  # trim astral chars that count double
+        s = s[:-1]
+    return s + "…"
+
+
 def _chunk_message_groups(messages: list[str], header: str, limit: int) -> list[list[str]]:
     """Split messages into groups whose rendered body stays within ``limit`` (#40).
 
-    Each group renders as ``header`` + blank-line-joined messages. A single
-    message longer than the budget is truncated with an ellipsis so it can never
-    wedge delivery.
+    Each group renders as ``header`` + blank-line-joined messages. Lengths are
+    measured in UTF-16 units (Telegram's unit). A single message longer than the
+    budget is truncated so it can never wedge delivery.
     """
     sep = "\n\n"
-    base = len(header) + len(sep)  # header plus the separator before message 1
+    base = _tg_len(header) + _tg_len(sep)  # header plus the separator before message 1
     groups: list[list[str]] = []
     cur: list[str] = []
     cur_len = 0
     for m in messages:
-        mt = m if len(m) <= limit - base else m[: limit - base - 1] + "…"
-        add = len(mt) + (len(sep) if cur else 0)
+        mt = _truncate_tg(m, limit - base)
+        add = _tg_len(mt) + (_tg_len(sep) if cur else 0)
         if cur and base + cur_len + add > limit:
             groups.append(cur)
             cur, cur_len = [], 0
-            add = len(mt)
+            add = _tg_len(mt)
         cur.append(mt)
         cur_len += add
     if cur:
