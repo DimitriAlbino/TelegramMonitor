@@ -73,9 +73,7 @@ class MonitorCreate(MonitorBase):
         # api_content requires its JSON knobs at creation (#33): without them
         # the executor returns a permanent config-error failure that alerts like
         # an outage, so the monitor sits forever "down" from the first Check.
-        if self.check_kind == "api_content" and (
-            not self.json_field_path or not self.json_keyword
-        ):
+        if self.check_kind == "api_content" and (not self.json_field_path or not self.json_keyword):
             raise ValueError("api_content monitors require json_field_path and json_keyword")
         return self
 
