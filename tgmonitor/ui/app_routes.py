@@ -205,6 +205,19 @@ async def create_monitor_submit(
             },
         )
 
+    # api_content monitors need both json fields, else every Check fails with a
+    # config error that alerts like an outage (#33). Enforce it on the UI create
+    # path too, matching the API-side MonitorCreate validation.
+    if check_kind == "api_content" and (not json_field_path or not json_keyword):
+        return _render(
+            request,
+            "monitor_form.html",
+            {
+                "m": None,
+                "error": "API content monitors require both a JSON field path and a keyword.",
+            },
+        )
+
     config: dict[str, Any] = _build_monitor_config(
         check_kind,
         timeout_s=timeout_s,
@@ -418,9 +431,12 @@ async def test_alert(
             },
         )
     from tgmonitor.telegram.client import NotificationChannel
+    from tgmonitor.telegram.html import esc_html
 
     channel = NotificationChannel()
-    await channel.send(chat_id, f"🧪 <b>{monitor.name}</b> — test alert from the web UI.")
+    await channel.send(
+        chat_id, f"🧪 <b>{esc_html(monitor.name)}</b> — test alert from the web UI."
+    )
     return RedirectResponse(f"/ui/monitors/{monitor_id}", status_code=302)
 
 
