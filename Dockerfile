@@ -10,15 +10,20 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install dependencies first for layer caching. Install the project itself
-# afterward so source changes don't bust the dependency layer.
-COPY pyproject.toml alembic.ini README.md ./
+# Install dependencies FIRST for layer caching (#35): copy only the manifest +
+# lock, install deps, THEN copy the sources. A source change no longer busts
+# the slow dependency-install layer. uv.lock pins resolved versions so the image
+# is reproducible; if it is absent, pip falls back to pyproject lower bounds.
+COPY pyproject.toml uv.lock* ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --root-user-action=ignore .
+
+# Sources copied after deps so they don't invalidate the dep layer.
+COPY alembic.ini README.md ./
 COPY alembic ./alembic
 COPY tgmonitor ./tgmonitor
 COPY templates ./templates
 COPY static ./static
-
-RUN pip install --root-user-action=ignore .
 
 # Non-root user: the container shouldn't run as root.
 RUN useradd --create-home --uid 10001 appuser

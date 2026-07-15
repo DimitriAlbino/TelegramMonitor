@@ -43,6 +43,13 @@ packages = ["tgmonitor"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# passlib is unmaintained (last release 2020) and accesses argon2-cffi's
+# `__version__` attribute, which emits a DeprecationWarning on every hash. We
+# migrate off passlib separately (tracked); until then the warning is noise, so
+# suppress it in the test output rather than chasing it in every run (#35).
+filterwarnings = [
+    "ignore:Accessing argon2.__version__ is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100
