@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tgmonitor.auth.email import send_reset_email, send_verification_email
-from tgmonitor.auth.ratelimit import get_ip_limiter
+from tgmonitor.auth.ratelimit import client_ip_from_request, get_email_limiter, get_ip_limiter
 from tgmonitor.auth.tokens import (
     create_purpose_token,
     create_session_token,
@@ -35,6 +35,11 @@ router = APIRouter(prefix="/ui", tags=["ui-auth"], include_in_schema=False)
 templates = Jinja2Templates(directory="templates")
 
 MIN_PASSWORD_LEN = 8
+
+# A dummy argon2 hash used to keep login timing constant when the email is not
+# registered (#29): a missing User otherwise short-circuits before the password
+# hash check, creating a timing oracle.
+_DUMMY_HASH = hash_password("constant-time-dummy-do-not-use")
 
 # The template base checks ``current_user`` to decide whether to show the nav.
 templates.env.globals["current_user"] = None
@@ -56,7 +61,7 @@ def _clear_session_cookie(response: Response) -> None:
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    return client_ip_from_request(request)
 
 
 def _render(
@@ -97,8 +102,22 @@ async def login_submit(
             {"email": email, "error": "Too many attempts. Please wait a few minutes."},
             status_code=429,
         )
+    # Apply the per-email limiter too (#29): the UI login only checked the IP
+    # limiter, so a distributed set of IPs could brute-force one email.
+    if not await get_email_limiter().check(email.lower()):
+        return _render(
+            request,
+            "login.html",
+            {"email": email, "error": "Too many attempts for this email. Please wait."},
+            status_code=429,
+        )
     user = await session.scalar(select(User).where(User.email == email.lower()))
-    if user is None or not verify_password(password, user.password_hash):
+    # Constant-time password check for a missing User (#29): run a real verify
+    # against a dummy hash so timing does not branch on user existence. The
+    # naive `user is None or not verify(...)` short-circuits past the hash check.
+    stored_hash = user.password_hash if user is not None else _DUMMY_HASH
+    password_ok = verify_password(password, stored_hash)
+    if user is None or not password_ok:
         return _render(
             request,
             "login.html",
@@ -231,7 +250,23 @@ async def reset_request_submit(
     email: Annotated[str, Form()],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Any:
-    await get_ip_limiter().check(_client_ip(request))
+    # Enforce the limiter (#29): the result was discarded, so reset requests
+    # were unthrottled (each also rotates the reset token, invalidating prior
+    # legitimate links).
+    if not await get_ip_limiter().check(_client_ip(request)):
+        return _render(
+            request,
+            "reset_request.html",
+            {"success": None, "error": "Too many attempts. Please wait a few minutes."},
+            status_code=429,
+        )
+    if not await get_email_limiter().check(email.lower()):
+        return _render(
+            request,
+            "reset_request.html",
+            {"success": None, "error": "Too many attempts for this email. Please wait."},
+            status_code=429,
+        )
     user = await session.scalar(select(User).where(User.email == email.lower()))
     if user is not None:
         token, jti = create_purpose_token(user.id, "reset")

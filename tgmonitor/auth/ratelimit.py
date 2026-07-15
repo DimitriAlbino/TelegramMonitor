@@ -16,6 +16,8 @@ import asyncio
 from collections import defaultdict, deque
 from datetime import UTC, datetime
 
+from fastapi import Request
+
 from tgmonitor.config import get_settings
 
 
@@ -72,3 +74,26 @@ def get_email_limiter() -> RateLimiter:
             window_s=s.auth_rate_window_s, max_per_key=s.auth_rate_max_per_email
         )
     return _email_limiter
+
+
+def client_ip_from_request(request: Request, *, trust_proxy: bool | None = None) -> str:
+    """Derive the client IP, honoring a trusted proxy hop (#29).
+
+    Behind a reverse proxy (Caddy), ``request.client.host`` is the proxy's IP
+    for everyone, collapsing all Users into one rate-limit bucket. When
+    ``trust_proxy`` is enabled (set via ``TRUST_PROXY_HEADERS=true`` for a deploy
+    we know sits behind our proxy), the left-most address in
+    ``X-Forwarded-For`` is used — that is the originating client as recorded by
+    the proxy. When not enabled, the header is ignored so an arbitrary client
+    cannot spoof an IP to evade or weaponize the limiter.
+
+    Falls back to ``request.client.host`` when the header is absent, and to
+    ``"unknown"`` when even that is missing.
+    """
+    trust = trust_proxy if trust_proxy is not None else bool(get_settings().trust_proxy_headers)
+    if trust:
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            # Left-most is the original client; proxies append their own hop.
+            return xff.split(",")[0].strip() or "unknown"
+    return request.client.host if request.client else "unknown"
