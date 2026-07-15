@@ -102,3 +102,68 @@ def test_resolver_default_uses_real_dns_for_public() -> None:
     """The default resolver path is exercised by signature, not real DNS here."""
     # Just ensure the function accepts the default resolver arg shape.
     assert callable(assert_safe_destination)
+
+
+# --- Regression tests for the production redirect path (#22) ---
+#
+# The SSRF re-validation hook must be attached to an *injected* client (the
+# pooled client the worker engine builds), not only to the per-request client
+# created inside HttpTransport. Otherwise redirect targets are never re-checked
+# in production and an external URL that 302s to an internal address bypasses
+# the guard entirely.
+
+
+def test_http_transport_attaches_ssrf_hook_to_injected_client() -> None:
+    import httpx
+
+    from tgmonitor.executors.http import HttpTransport, _ssrf_request_hook
+
+    client = httpx.AsyncClient()
+    HttpTransport(client)
+    assert _ssrf_request_hook in client.event_hooks.get("request", []), (
+        "the SSRF hook must be registered on an injected (pooled) client"
+    )
+
+
+async def test_http_redirect_to_internal_is_blocked() -> None:
+    """A 302 from a public target to an internal address is refused (#22)."""
+    import httpx
+
+    from tgmonitor.executors.base import CheckConfig
+    from tgmonitor.executors.http import HttpTransport, run_http_check
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"location": "http://127.0.0.1/meta-data"})
+        return httpx.Response(200, text="leaked internal content")
+
+    # Public literal IP as the start target so no real DNS is needed; the
+    # injected client mirrors the engine's pooled follow_redirects client.
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
+    transport = HttpTransport(client)
+    cfg = CheckConfig(
+        monitor_id=1,
+        check_kind="http",
+        target="http://93.184.216.34/start",
+        follow_redirects=True,
+    )
+    result = await run_http_check(cfg, transport)
+    await client.aclose()
+    assert result.success is False
+    assert "blocked" in result.reason
+    assert "leaked" not in result.reason
+
+
+async def test_api_content_internal_target_is_blocked() -> None:
+    """api_content must refuse an internal target before fetching (#22)."""
+    from tests.conftest import FakeTransport, api_content_config
+    from tgmonitor.executors.api_content import run_api_content_check
+
+    # The transport would 'succeed' if reached; the guard must block first.
+    transport = FakeTransport(
+        responses={"http://169.254.169.254/latest/meta-data": (200, '{"mode": "live"}')}
+    )
+    cfg = api_content_config(target="http://169.254.169.254/latest/meta-data")
+    result = await run_api_content_check(cfg, transport)
+    assert result.success is False
+    assert "blocked" in result.reason

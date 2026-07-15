@@ -48,6 +48,10 @@ class _FakeSession:
         self.add = AsyncMock()
         self.flush = AsyncMock()
 
+    async def refresh(self, obj, attribute_names=None):
+        # Record the re-read so tests can assert it happens under the lock (#32).
+        self.executed.append(("REFRESH", attribute_names))
+
     async def execute(self, statement, params=None):
         sql = str(statement)
         self.executed.append((sql, params))
@@ -86,6 +90,16 @@ async def test_apply_transition_takes_per_monitor_lock_first() -> None:
     first_sql = session.executed[0][0]
     assert "pg_advisory_xact_lock" in first_sql, (
         "concurrent transitions must serialize on a per-monitor advisory lock"
+    )
+    # The counter re-read (#32) must happen AFTER the lock and BEFORE the state
+    # UPDATE — otherwise the lock serializes writes but both start from the same
+    # stale pre-lock value and one failure increment is lost.
+    steps = [s[0] for s in session.executed]
+    lock_i = next(i for i, s in enumerate(steps) if "pg_advisory_xact_lock" in s)
+    refresh_i = next(i for i, s in enumerate(steps) if s == "REFRESH")
+    update_i = next(i for i, s in enumerate(steps) if "UPDATE" in s)
+    assert lock_i < refresh_i < update_i, (
+        "counter must be refreshed under the lock, before the write (#32)"
     )
 
 

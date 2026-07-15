@@ -94,6 +94,9 @@ def client_ip_from_request(request: Request, *, trust_proxy: bool | None = None)
     if trust:
         xff = request.headers.get("x-forwarded-for", "")
         if xff:
-            # Left-most is the original client; proxies append their own hop.
-            return xff.split(",")[0].strip() or "unknown"
+            # Trust exactly one proxy hop (Caddy). Caddy *appends* the real peer
+            # address to any client-supplied X-Forwarded-For, so the right-most
+            # entry is the one our proxy observed and is not spoofable; the
+            # left-most entries are attacker-controlled and must never be used.
+            return xff.split(",")[-1].strip() or "unknown"
     return request.client.host if request.client else "unknown"
