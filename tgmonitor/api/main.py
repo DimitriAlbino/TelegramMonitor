@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +25,8 @@ from tgmonitor.auth.routes import router as auth_router
 from tgmonitor.db import dispose_engine, get_engine, get_session
 from tgmonitor.models import Check, Monitor, User
 from tgmonitor.telegram.webhook import router as telegram_router
+from tgmonitor.ui.app_routes import router as ui_app_router
+from tgmonitor.ui.auth_routes import router as ui_auth_router
 
 # Annotated dependency aliases — the idiomatic FastAPI form that also satisfies
 # the "no function call in default" lint rule (B008).
@@ -74,6 +77,10 @@ def create_app() -> FastAPI:
     app.include_router(statuspage_config_router)
     app.include_router(statuspage_public_router)
     app.include_router(telegram_router)
+    app.include_router(ui_auth_router)
+    app.include_router(ui_app_router)
+    # Serve static assets (CSS) and mount the templates directory.
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, object]:

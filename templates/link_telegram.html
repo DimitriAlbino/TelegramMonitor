@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Link Telegram — TelegramMonitor{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Link Telegram</h1>
+
+  {% if linked_chat %}
+    <div class="flash flash-success">✅ Your Telegram chat is linked (chat_id: {{ linked_chat }}).</div>
+    <p class="text-dim mt-1">You will receive Alerts and Reports at this chat.</p>
+    <form method="post" action="/ui/link-telegram/unlink" class="mt-2"
+          onsubmit="return confirm('Unlink your Telegram chat? Alerts will no longer be delivered.')">
+      <button class="btn-danger">Unlink</button>
+    </form>
+  {% else %}
+    <p>Link your account to receive alerts on Telegram. Open the bot and press <strong>Start</strong> to confirm.</p>
+    <div class="mt-2" style="text-align:center">
+      <a href="{{ deep_link }}" class="btn" style="font-size:1.1rem;padding:1rem 2rem">Open @{{ bot_name or 'LightningApiBot' }} on Telegram →</a>
+    </div>
+    <p class="text-dim mt-2" style="text-align:center">
+      Or open <code>{{ deep_link }}</code> on your device.<br>
+      The link expires in 30 minutes.
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Settings — TelegramMonitor{% endblock %}
+{% block content %}
+<h1>Account Settings</h1>
+
+{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+{% if success %}<div class="flash flash-success">{{ success }}</div>{% endif %}
+
+<div class="card">
+  <h2>Change Password</h2>
+  <form method="post" action="/ui/settings/password">
+    <div class="form-group">
+      <label for="current_password">Current password</label>
+      <input type="password" id="current_password" name="current_password" required>
+    </div>
+    <div class="form-group">
+      <label for="new_password">New password (min 8 characters)</label>
+      <input type="password" id="new_password" name="new_password" required minlength="8">
+    </div>
+    <button type="submit">Change password</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Quiet Hours</h2>
+  <p class="text-dim mb-2">
+    During the quiet-hours window, non-critical Alerts are held and delivered as a single digest
+    when the window ends. Monitors marked <strong>critical</strong> always page immediately.
+  </p>
+  <form method="post" action="/ui/settings/quiet-hours">
+    <div class="form-group">
+      <label>
+        <input type="checkbox" name="quiet_hours_enabled" value="true"
+               {{ 'checked' if owner.quiet_hours_start }} onchange="document.getElementById('qh-fields').style.display = this.checked ? '' : 'none'">
+        Enable quiet hours
+      </label>
+    </div>
+    <div id="qh-fields" style="{{ '' if owner.quiet_hours_start else 'display:none' }}">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="quiet_hours_start">Start time</label>
+          <input type="time" id="quiet_hours_start" name="quiet_hours_start" value="{{ owner.quiet_hours_start or '22:00' }}">
+        </div>
+        <div class="form-group">
+          <label for="quiet_hours_end">End time</label>
+          <input type="time" id="quiet_hours_end" name="quiet_hours_end" value="{{ owner.quiet_hours_end or '07:00' }}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="quiet_hours_tz">Timezone</label>
+        <select id="quiet_hours_tz" name="quiet_hours_tz">
+          <option value="UTC" {{ 'selected' if owner.quiet_hours_tz == 'UTC' or not owner.quiet_hours_tz }}>UTC</option>
+          <option value="Europe/London" {{ 'selected' if owner.quiet_hours_tz == 'Europe/London' }}>Europe/London</option>
+          <option value="Europe/Berlin" {{ 'selected' if owner.quiet_hours_tz == 'Europe/Berlin' }}>Europe/Berlin</option>
+          <option value="Europe/Madrid" {{ 'selected' if owner.quiet_hours_tz == 'Europe/Madrid' }}>Europe/Madrid</option>
+          <option value="America/New_York" {{ 'selected' if owner.quiet_hours_tz == 'America/New_York' }}>America/New_York</option>
+          <option value="America/Chicago" {{ 'selected' if owner.quiet_hours_tz == 'America/Chicago' }}>America/Chicago</option>
+          <option value="America/Los_Angeles" {{ 'selected' if owner.quiet_hours_tz == 'America/Los_Angeles' }}>America/Los_Angeles</option>
+          <option value="Asia/Tokyo" {{ 'selected' if owner.quiet_hours_tz == 'Asia/Tokyo' }}>Asia/Tokyo</option>
+        </select>
+      </div>
+      <p class="text-dim mt-1">Supports windows that cross midnight (e.g. 22:00–07:00).</p>
+    </div>
+    <button type="submit" class="mt-2">Save quiet hours</button>
+  </form>
+</div>
+{% endblock %}

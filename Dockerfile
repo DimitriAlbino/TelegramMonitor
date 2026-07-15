@@ -15,6 +15,8 @@ WORKDIR /app
 COPY pyproject.toml alembic.ini README.md ./
 COPY alembic ./alembic
 COPY tgmonitor ./tgmonitor
+COPY templates ./templates
+COPY static ./static
 
 RUN pip install --root-user-action=ignore .
 
