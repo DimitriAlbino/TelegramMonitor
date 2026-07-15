@@ -59,6 +59,7 @@ class MonitorBase(BaseModel):
     body_contains: str | None = None
     max_latency_ms: int | None = Field(default=None, ge=1)
     timeout_s: float | None = Field(default=None, ge=0.5, le=60.0)
+    follow_redirects: bool = False
 
 
 class MonitorCreate(MonitorBase):
@@ -81,6 +82,7 @@ class MonitorUpdate(BaseModel):
     body_contains: str | None = None
     max_latency_ms: int | None = Field(default=None, ge=1)
     timeout_s: float | None = Field(default=None, ge=0.5, le=60.0)
+    follow_redirects: bool | None = None
 
 
 class MonitorOut(BaseModel):
@@ -114,6 +116,8 @@ def _build_config(m: MonitorBase | MonitorUpdate) -> dict[str, Any]:
         # both forms so the engine's claim query picks the right one.
         cfg["timeout_s"] = m.timeout_s
         cfg["tcp_timeout_s"] = m.timeout_s
+    if getattr(m, "follow_redirects", None) is not None:
+        cfg["follow_redirects"] = m.follow_redirects
     return cfg
 
 
@@ -257,7 +261,13 @@ async def update_monitor(
     ):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "tcp target must be host:port")
     # Merge kind-specific knobs into the existing config.
-    config_keys = {"expected_status", "body_contains", "max_latency_ms", "timeout_s"}
+    config_keys = {
+        "expected_status",
+        "body_contains",
+        "max_latency_ms",
+        "timeout_s",
+        "follow_redirects",
+    }
     cfg = dict(monitor.config or {})
     for k in config_keys:
         if k in data:

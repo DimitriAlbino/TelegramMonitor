@@ -22,7 +22,9 @@ class TcpTransport:
     backend-agnostic; tests pass a fake.
     """
 
-    async def request(self, url: str, *, timeout_s: float) -> tuple[int, str]:
+    async def request(
+        self, url: str, *, timeout_s: float, follow_redirects: bool = False
+    ) -> tuple[int, str]:
         # For TCP, ``url`` is actually ``host:port``. Resolve and connect; raise
         # on failure (the executor maps exceptions to a failing Result).
         host, _, port_str = url.rpartition(":")

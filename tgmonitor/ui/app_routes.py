@@ -124,6 +124,7 @@ async def create_monitor_submit(
     body_contains: Annotated[str, Form()] = "",
     max_latency_ms: Annotated[int | None, Form()] = None,
     timeout_s: Annotated[float, Form()] = 10.0,
+    follow_redirects: Annotated[bool, Form()] = False,
     critical: Annotated[bool, Form()] = False,
     show_on_status_page: Annotated[bool, Form()] = False,
 ) -> Any:
@@ -154,7 +155,11 @@ async def create_monitor_submit(
             },
         )
 
-    config: dict[str, Any] = {"timeout_s": timeout_s, "tcp_timeout_s": timeout_s}
+    config: dict[str, Any] = {
+        "timeout_s": timeout_s,
+        "tcp_timeout_s": timeout_s,
+        "follow_redirects": follow_redirects,
+    }
     if check_kind == "http":
         config["expected_status"] = expected_status
         if body_contains:
@@ -261,6 +266,7 @@ async def edit_monitor_submit(
     body_contains: Annotated[str, Form()] = "",
     max_latency_ms: Annotated[int | None, Form()] = None,
     timeout_s: Annotated[float, Form()] = 10.0,
+    follow_redirects: Annotated[bool, Form()] = False,
     critical: Annotated[bool, Form()] = False,
     show_on_status_page: Annotated[bool, Form()] = False,
 ) -> Any:

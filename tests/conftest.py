@@ -31,7 +31,9 @@ class FakeTransport:
         self.delays = delays or {}
         self.requested: list[str] = []
 
-    async def request(self, url: str, *, timeout_s: float) -> tuple[int, str]:
+    async def request(
+        self, url: str, *, timeout_s: float, follow_redirects: bool = False
+    ) -> tuple[int, str]:
         import asyncio
 
         self.requested.append(url)

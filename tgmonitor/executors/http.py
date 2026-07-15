@@ -32,11 +32,13 @@ class HttpTransport:
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self._client = client
 
-    async def request(self, url: str, *, timeout_s: float) -> tuple[int, str]:
+    async def request(
+        self, url: str, *, timeout_s: float, follow_redirects: bool = False
+    ) -> tuple[int, str]:
         client = self._client or httpx.AsyncClient(timeout=timeout_s)
         owned = self._client is None
         try:
-            resp = await client.get(url, timeout=timeout_s)
+            resp = await client.get(url, timeout=timeout_s, follow_redirects=follow_redirects)
             return resp.status_code, resp.text
         finally:
             if owned:
@@ -56,7 +58,9 @@ async def run_http_check(config: CheckConfig, transport: Transport) -> Result:
     status_code = 0
     body_text = ""
     try:
-        status_code, body_text = await transport.request(config.target, timeout_s=config.timeout_s)
+        status_code, body_text = await transport.request(
+            config.target, timeout_s=config.timeout_s, follow_redirects=config.follow_redirects
+        )
     except httpx.TimeoutException:
         transport_error = f"timed out after {config.timeout_s}s"
     except httpx.HTTPError as exc:

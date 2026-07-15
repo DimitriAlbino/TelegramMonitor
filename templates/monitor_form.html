@@ -3,11 +3,10 @@
 {% block content %}
 <div class="card">
   <h1>{{ 'Edit' if m else 'Create' }} Monitor</h1>
-  {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
   <form method="post" action="{{ '/ui/monitors/' ~ m.id ~ '/edit' if m else '/ui/monitors/new' }}">
     <div class="form-group">
       <label for="name">Name</label>
-      <input type="text" id="name" name="name" required value="{{ m.name if m else '' }}">
+      <input type="text" id="name" name="name" required value="{{ m.name if m else '' }}" placeholder="e.g. Billing API">
     </div>
     <div class="form-group">
       <label for="check_kind">Check Kind</label>
@@ -15,16 +14,16 @@
         <option value="http" {{ 'selected' if not m or m.check_kind == 'http' }}>HTTP (GET a URL)</option>
         <option value="tcp" {{ 'selected' if m and m.check_kind == 'tcp' }}>TCP (open host:port)</option>
       </select>
-      {% if m %}<p class="text-dim mt-1">Kind cannot be changed after creation.</p>{% endif %}
+      {% if m %}<p class="text-dim text-sm mt-1">Kind cannot be changed after creation.</p>{% endif %}
     </div>
     <div class="form-group">
-      <label for="target">Target (URL for HTTP, host:port for TCP)</label>
-      <input type="text" id="target" name="target" required value="{{ m.target if m else '' }}">
+      <label for="target">Target</label>
+      <input type="text" id="target" name="target" required value="{{ m.target if m else '' }}" placeholder="https://example.com or host:port">
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label for="interval_s">Interval (seconds, min {{ min_interval }})</label>
-        <input type="number" id="interval_s" name="interval_s" required min="{{ min_interval or 30 }}" value="{{ m.interval_s if m else 30 }}">
+        <label for="interval_s">Interval (seconds)</label>
+        <input type="number" id="interval_s" name="interval_s" required min="30" value="{{ m.interval_s if m else 30 }}">
       </div>
       <div class="form-group">
         <label for="timeout_s">Timeout (seconds)</label>
@@ -33,16 +32,15 @@
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label for="failure_threshold">Failure Threshold (consecutive failures to open)</label>
+        <label for="failure_threshold">Failure Threshold</label>
         <input type="number" id="failure_threshold" name="failure_threshold" min="1" value="{{ m.failure_threshold if m else 3 }}">
       </div>
       <div class="form-group">
-        <label for="recovery_threshold">Recovery Threshold (consecutive successes to close)</label>
+        <label for="recovery_threshold">Recovery Threshold</label>
         <input type="number" id="recovery_threshold" name="recovery_threshold" min="1" value="{{ m.recovery_threshold if m else 2 }}">
       </div>
     </div>
 
-    {# HTTP-specific fields (shown for http kind) #}
     <div id="http-fields">
       <div class="form-row">
         <div class="form-group">
@@ -56,23 +54,26 @@
       </div>
       <div class="form-group">
         <label for="body_contains">Required body keyword (optional)</label>
-        <input type="text" id="body_contains" name="body_contains" value="{{ m.config.body_contains if m and m.config.body_contains else '' }}">
+        <input type="text" id="body_contains" name="body_contains" value="{{ m.config.body_contains if m and m.config.body_contains else '' }}" placeholder="e.g. healthy">
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" name="follow_redirects" value="true" {{ 'checked' if m and m.config.get('follow_redirects') }}> Follow redirects (accept 301/302 — check the final destination)</label>
       </div>
     </div>
 
-    <div class="form-group" style="display:flex;gap:1.5rem;margin-top:1rem">
+    <div class="form-checks">
       <label><input type="checkbox" name="critical" value="true" {{ 'checked' if m and m.critical }}> Critical (bypasses quiet hours)</label>
       <label><input type="checkbox" name="show_on_status_page" value="true" {{ 'checked' if m and m.show_on_status_page }}> Show on status page</label>
     </div>
 
-    <button type="submit">{{ 'Save changes' if m else 'Create monitor' }}</button>
-    {% if m %}<a href="/ui/monitors/{{ m.id }}" class="btn-link" style="margin-left:1rem">Cancel</a>{% endif %}
+    <div class="mt-2">
+      <button type="submit">{{ 'Save changes' if m else 'Create monitor' }}</button>
+      {% if m %}<a href="/ui/monitors/{{ m.id }}" class="btn-link" style="margin-left:0.75rem">Cancel</a>{% endif %}
+    </div>
   </form>
 </div>
 
 <script>
-// Toggle HTTP-specific fields based on check_kind. On edit, kind is disabled so
-// the correct section is shown by default.
 document.getElementById('check_kind').addEventListener('change', function() {
   document.getElementById('http-fields').style.display = this.value === 'http' ? '' : 'none';
 });
