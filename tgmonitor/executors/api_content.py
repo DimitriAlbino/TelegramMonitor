@@ -22,12 +22,23 @@ async def run_api_content_check(config: CheckConfig, transport: Transport) -> Re
 
     Requires ``config.json_field_path`` and ``config.json_keyword`` to be set;
     if either is missing, returns a failing Result (configuration error).
+
+    The target is checked against the SSRF blocklist (#22) before any request —
+    an api_content monitor could otherwise read internal JSON APIs (e.g. cloud
+    metadata) and the field reason is shown to the user.
     """
     if not config.json_field_path or not config.json_keyword:
         return Result(
             success=False,
             reason="api_content check requires json_field_path and json_keyword",
         )
+
+    from tgmonitor.executors.ssrf import DestinationBlocked, assert_safe_destination
+
+    try:
+        assert_safe_destination(config.target)
+    except DestinationBlocked as exc:
+        return Result(success=False, reason=f"target blocked: {exc}")
 
     start = time.monotonic()
     transport_error: str | None = None
@@ -37,6 +48,8 @@ async def run_api_content_check(config: CheckConfig, transport: Transport) -> Re
         status_code, body_text = await transport.request(
             config.target, timeout_s=config.timeout_s, follow_redirects=config.follow_redirects
         )
+    except DestinationBlocked as exc:
+        return Result(success=False, reason=f"target blocked: {exc}", latency_ms=0)
     except httpx.TimeoutException:
         transport_error = f"timed out after {config.timeout_s}s"
     except httpx.HTTPError as exc:

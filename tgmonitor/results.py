@@ -132,16 +132,21 @@ def classify_api_content(
 
     value_str = str(current)
     if keyword in value_str:
+        # Do not echo the fetched value into the reason (#22): up to 80 chars of
+        # any field were written into Check.reason and shown to the user,
+        # turning blind SSRF (e.g. cloud metadata) into data exfiltration. The
+        # reason reports only what the monitor configured (path + keyword), not
+        # the response payload.
         return Result(
             success=False,
-            reason=f"field '{json_field_path}' contains '{keyword}' (value: {value_str[:80]})",
+            reason=f"field '{json_field_path}' contains alarm keyword '{keyword}'",
             status_code=status_code,
             latency_ms=latency_ms,
         )
 
     return Result(
         success=True,
-        reason=f"field '{json_field_path}' = {value_str[:80]}",
+        reason=f"field '{json_field_path}' does not contain '{keyword}'",
         status_code=status_code,
         latency_ms=latency_ms,
     )

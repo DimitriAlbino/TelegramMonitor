@@ -42,6 +42,54 @@ def _render(
     return templates.TemplateResponse(request, name, base, status_code=status_code)
 
 
+def _build_monitor_config(
+    check_kind: str,
+    *,
+    timeout_s: float,
+    expected_status: int,
+    body_contains: str,
+    max_latency_ms: int | None,
+    follow_redirects: bool,
+    json_field_path: str,
+    json_keyword: str,
+    existing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the JSONB ``config`` for a Monitor from form fields.
+
+    On edit, kind-specific knobs the form does not show for the current kind
+    are preserved from ``existing`` rather than dropped (#23): renaming an
+    api_content monitor must not wipe its JSON fields, and editing an HTTP
+    monitor must not silently revert follow_redirects. The create path passes
+    ``existing=None`` (build from scratch).
+    """
+    cfg: dict[str, Any] = dict(existing or {})
+    # timeout_s applies to every kind (HTTP and TCP both read it; the engine's
+    # claim query picks timeout_s vs tcp_timeout_s by kind).
+    cfg["timeout_s"] = timeout_s
+    cfg["tcp_timeout_s"] = timeout_s
+    if check_kind == "http":
+        cfg["expected_status"] = expected_status
+        cfg["follow_redirects"] = follow_redirects
+        if body_contains:
+            cfg["body_contains"] = body_contains
+        else:
+            cfg.pop("body_contains", None)
+        if max_latency_ms:
+            cfg["max_latency_ms"] = max_latency_ms
+        else:
+            cfg.pop("max_latency_ms", None)
+    if check_kind == "api_content":
+        if json_field_path:
+            cfg["json_field_path"] = json_field_path
+        else:
+            cfg.pop("json_field_path", None)
+        if json_keyword:
+            cfg["json_keyword"] = json_keyword
+        else:
+            cfg.pop("json_keyword", None)
+    return cfg
+
+
 def _state_badge(monitor: Monitor, latest: Check | None) -> str:
     if monitor.paused:
         return "paused"
@@ -157,22 +205,16 @@ async def create_monitor_submit(
             },
         )
 
-    config: dict[str, Any] = {
-        "timeout_s": timeout_s,
-        "tcp_timeout_s": timeout_s,
-        "follow_redirects": follow_redirects,
-    }
-    if check_kind == "http":
-        config["expected_status"] = expected_status
-        if body_contains:
-            config["body_contains"] = body_contains
-        if max_latency_ms:
-            config["max_latency_ms"] = max_latency_ms
-    if check_kind == "api_content":
-        if json_field_path:
-            config["json_field_path"] = json_field_path
-        if json_keyword:
-            config["json_keyword"] = json_keyword
+    config: dict[str, Any] = _build_monitor_config(
+        check_kind,
+        timeout_s=timeout_s,
+        expected_status=expected_status,
+        body_contains=body_contains,
+        max_latency_ms=max_latency_ms,
+        follow_redirects=follow_redirects,
+        json_field_path=json_field_path,
+        json_keyword=json_keyword,
+    )
 
     monitor = Monitor(
         user_id=user.id,
@@ -300,14 +342,21 @@ async def edit_monitor_submit(
     monitor.recovery_threshold = recovery_threshold
     monitor.critical = critical
     monitor.show_on_status_page = show_on_status_page
-    config: dict[str, Any] = {"timeout_s": timeout_s, "tcp_timeout_s": timeout_s}
-    if monitor.check_kind == "http":
-        config["expected_status"] = expected_status
-        if body_contains:
-            config["body_contains"] = body_contains
-        if max_latency_ms:
-            config["max_latency_ms"] = max_latency_ms
-    monitor.config = config
+    # Preserve kind-specific config the form does not re-post for this kind
+    # (#23): editing an api_content monitor must keep its JSON fields, and
+    # editing an HTTP monitor must keep follow_redirects. Merge posted fields
+    # over the existing config instead of rebuilding it from scratch.
+    monitor.config = _build_monitor_config(
+        monitor.check_kind,
+        timeout_s=timeout_s,
+        expected_status=expected_status,
+        body_contains=body_contains,
+        max_latency_ms=max_latency_ms,
+        follow_redirects=follow_redirects,
+        json_field_path=json_field_path,
+        json_keyword=json_keyword,
+        existing=dict(monitor.config or {}),
+    )
     await session.commit()
     return RedirectResponse(f"/ui/monitors/{monitor_id}", status_code=302)
 
