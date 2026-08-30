@@ -9,6 +9,8 @@ the network. Cases mirror the launch spec's Seam B list:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import httpx
 import pytest
 
@@ -136,3 +138,113 @@ async def test_internal_target_refused() -> None:
     assert "blocked" in result.reason
     # The transport must never have been called for a blocked target.
     assert transport.requested == []
+
+
+# --- Pinned-candidate fallback (dual-stack reachability) ---
+#
+# The transport resolves a hostname to ordered candidates (IPv4 first — see
+# pick_safe_ips) and tries each on ConnectError, so a dual-stack target stays
+# monitorable from a single-stack network (e.g. a Docker bridge without IPv6).
+# These tests drive HttpTransport with a MockTransport and a faked resolver:
+# the handler sees the pinned IP as the URL host, so it can fail per-address.
+
+
+@contextmanager
+def _patched_resolver(addrs: list[str]):
+    """Point the module resolver seam at a fixed answer for the block."""
+    from tgmonitor.executors import ssrf
+
+    orig = ssrf._default_resolver
+    ssrf._default_resolver = lambda _h: addrs
+    try:
+        yield
+    finally:
+        ssrf._default_resolver = orig
+
+
+async def test_pinned_candidates_tried_ipv4_first() -> None:
+    """v6 listed first in DNS must not be attempted first: IPv4 wins ordering."""
+    import httpx
+
+    from tgmonitor.executors.http import HttpTransport, run_http_check
+
+    seen: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host or "")
+        return httpx.Response(200, text="ok")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = HttpTransport(client)
+    with _patched_resolver(["2606:4700::1", "93.184.216.34"]):
+        result = await run_http_check(http_config("https://example.test"), transport)
+    await client.aclose()
+    assert result.success is True
+    assert seen == ["93.184.216.34"]  # IPv4 answered; v6 never needed
+
+
+async def test_pinned_candidates_fall_back_on_connect_error() -> None:
+    """A refused first candidate falls through to the next vetted address."""
+    import httpx
+
+    from tgmonitor.executors.http import HttpTransport, run_http_check
+
+    seen: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host or "")
+        if request.url.host == "93.184.216.34":
+            raise httpx.ConnectError("network is unreachable")
+        return httpx.Response(200, text="ok")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = HttpTransport(client)
+    with _patched_resolver(["2606:4700::1", "93.184.216.34"]):
+        result = await run_http_check(http_config("https://example.test"), transport)
+    await client.aclose()
+    assert result.success is True
+    assert seen == ["93.184.216.34", "2606:4700::1"]
+
+
+async def test_all_candidates_failing_reports_connect_error() -> None:
+    """Exhausting every candidate surfaces the last connect error as failure."""
+    import httpx
+
+    from tgmonitor.executors.http import HttpTransport, run_http_check
+
+    seen: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host or "")
+        raise httpx.ConnectError("network is unreachable")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = HttpTransport(client)
+    with _patched_resolver(["93.184.216.34", "2606:4700::1"]):
+        result = await run_http_check(http_config("https://example.test"), transport)
+    await client.aclose()
+    assert result.success is False
+    assert "connection failed" in result.reason
+    assert seen == ["93.184.216.34", "2606:4700::1"]
+
+
+async def test_connect_timeout_does_not_fan_out() -> None:
+    """A blackholed address must not multiply the probe clock: no per-IP retry."""
+    import httpx
+
+    from tgmonitor.executors.http import HttpTransport, run_http_check
+
+    seen: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host or "")
+        raise httpx.ConnectTimeout("timed out")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = HttpTransport(client)
+    with _patched_resolver(["93.184.216.34", "2606:4700::1"]):
+        result = await run_http_check(http_config("https://example.test"), transport)
+    await client.aclose()
+    assert result.success is False
+    assert "timed out" in result.reason
+    assert seen == ["93.184.216.34"]  # no fallback after a timeout

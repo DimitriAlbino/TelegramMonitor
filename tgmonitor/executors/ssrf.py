@@ -107,21 +107,26 @@ def assert_safe_destination(
             raise DestinationBlocked(f"host {host!r} resolves to blocked internal address {addr}")
 
 
-def pick_safe_ip(host: str, *, resolver: Resolver | None = None) -> str | None:
-    """Resolve ``host`` and return one safe IP to pin a connection to (#39).
+def pick_safe_ips(host: str, *, resolver: Resolver | None = None) -> list[str]:
+    """Resolve ``host`` and return the safe IPs to pin a connection to (#39).
+
+    Ordered deterministically: IPv4 first, then IPv6, each family sorted — a
+    dual-stack target is therefore attempted on IPv4 before IPv6. A host with
+    AAAA records must not become unmonitorable just because the caller's
+    network (e.g. a default Docker bridge) has no IPv6 egress.
 
     Raises :class:`DestinationBlocked` if *any* resolved address is internal
     (defensive against a round-robin name with one internal answer). Returns
-    ``None`` if the host does not resolve — the caller then connects by name and
-    fails naturally at connect time. Pinning to the returned IP closes the
-    DNS-rebinding TOCTOU: the address validated here is the exact one connected
-    to, so a name cannot answer public to the guard and internal to the client.
+    ``[]`` if the host does not resolve — the caller then connects by name and
+    fails naturally at connect time. The TOCTOU guarantee holds with multiple
+    candidates: they all come from this single resolution, each was vetted, and
+    one internal answer still blocks the whole host.
     """
     resolve = resolver or _default_resolver
     addrs = resolve(host)
     if not addrs:
-        return None
-    safe: list[str] = []
+        return []
+    vetted: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     for addr in addrs:
         a = addr.split("%", 1)[0]  # strip an IPv6 zone id (fe80::1%eth0)
         try:
@@ -130,8 +135,9 @@ def pick_safe_ip(host: str, *, resolver: Resolver | None = None) -> str | None:
             continue
         if is_blocked_ip(ip):
             raise DestinationBlocked(f"host {host!r} resolves to blocked internal address {a}")
-        safe.append(a)
-    return safe[0] if safe else None
+        vetted.append(ip)
+    vetted.sort(key=lambda ip: (ip.version, int(ip)))
+    return [str(ip) for ip in vetted]
 
 
 def _extract_host(target: str, *, is_host_port: bool) -> str:

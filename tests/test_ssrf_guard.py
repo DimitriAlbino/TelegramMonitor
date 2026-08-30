@@ -112,7 +112,7 @@ def test_resolver_default_uses_real_dns_for_public() -> None:
 # it validated, closing the DNS-rebinding TOCTOU.
 
 
-def test_pin_target_rewrites_hostname_to_validated_ip() -> None:
+def test_pin_candidates_rewrites_hostname_to_validated_ip() -> None:
     """A hostname is rewritten to its vetted IP with Host+SNI preserved (#39)."""
     import tgmonitor.executors.http as http_mod
     from tgmonitor.executors import ssrf
@@ -121,9 +121,11 @@ def test_pin_target_rewrites_hostname_to_validated_ip() -> None:
     orig = ssrf._default_resolver
     ssrf._default_resolver = lambda h: ["93.184.216.34"]
     try:
-        pinned, headers, sni = http_mod._pin_target("https://example.test:8443/path?q=1")
+        candidates = http_mod._pin_candidates("https://example.test:8443/path?q=1")
     finally:
         ssrf._default_resolver = orig
+    assert len(candidates) == 1
+    pinned, headers, sni = candidates[0]
     assert pinned == "https://93.184.216.34:8443/path?q=1"
     assert headers is not None
     assert headers["Host"] == "example.test:8443"
@@ -131,7 +133,26 @@ def test_pin_target_rewrites_hostname_to_validated_ip() -> None:
     assert sni == "example.test"
 
 
-def test_pin_target_refuses_hostname_resolving_internal() -> None:
+def test_pin_candidates_one_per_resolved_address_ipv4_first() -> None:
+    """A dual-stack name yields one candidate per address, IPv4 before IPv6."""
+    import tgmonitor.executors.http as http_mod
+    from tgmonitor.executors import ssrf
+
+    orig = ssrf._default_resolver
+    ssrf._default_resolver = lambda h: ["2606:4700::1", "93.184.216.34"]
+    try:
+        candidates = http_mod._pin_candidates("https://example.test/x")
+    finally:
+        ssrf._default_resolver = orig
+    assert [pinned for pinned, _h, _s in candidates] == [
+        "https://93.184.216.34/x",
+        "https://[2606:4700::1]/x",
+    ]
+    assert all(headers == {"Host": "example.test"} for _p, headers, _s in candidates)
+    assert all(sni == "example.test" for _p, _h, sni in candidates)
+
+
+def test_pin_candidates_refuses_hostname_resolving_internal() -> None:
     """DNS-rebinding: a name resolving to an internal IP is refused at pin (#39)."""
     import tgmonitor.executors.http as http_mod
     from tgmonitor.executors import ssrf
@@ -141,7 +162,7 @@ def test_pin_target_refuses_hostname_resolving_internal() -> None:
     ssrf._default_resolver = lambda h: ["169.254.169.254"]  # metadata endpoint
     try:
         with pytest.raises(DestinationBlocked):
-            http_mod._pin_target("http://rebind.test/latest/meta-data")
+            http_mod._pin_candidates("http://rebind.test/latest/meta-data")
     finally:
         ssrf._default_resolver = orig
 
@@ -191,7 +212,7 @@ async def test_api_content_internal_target_is_blocked() -> None:
     assert "blocked" in result.reason
 
 
-def test_pin_target_preserves_basic_auth_credentials() -> None:
+def test_pin_candidates_preserves_basic_auth_credentials() -> None:
     """Rewriting to the pinned IP keeps URL basic-auth via an Authorization header (#39)."""
     import base64
 
@@ -201,12 +222,58 @@ def test_pin_target_preserves_basic_auth_credentials() -> None:
     orig = ssrf._default_resolver
     ssrf._default_resolver = lambda h: ["93.184.216.34"]
     try:
-        pinned, headers, sni = http_mod._pin_target("https://user:pass@example.test/x")
+        candidates = http_mod._pin_candidates("https://user:pass@example.test/x")
     finally:
         ssrf._default_resolver = orig
+    assert len(candidates) == 1
+    pinned, headers, sni = candidates[0]
     assert pinned == "https://93.184.216.34/x"  # userinfo stripped from URL
     assert headers is not None
     expected = "Basic " + base64.b64encode(b"user:pass").decode()
     assert headers["Authorization"] == expected
     assert headers["Host"] == "example.test"
     assert sni == "example.test"
+
+
+# --- Ordered candidate selection (dual-stack reachability) ---
+#
+# A dual-stack target must be attempted on IPv4 before IPv6: a monitor host
+# whose network lacks IPv6 egress (e.g. a default Docker bridge) otherwise
+# deterministically fails on every probe when the unordered pick lands on the
+# AAAA record (the 2026-08-30 italdroni.it/caviauto.it incident).
+
+
+def test_pick_safe_ips_orders_ipv4_before_ipv6() -> None:
+    from tgmonitor.executors import ssrf
+
+    resolved = ["2606:4700::2", "93.184.216.34", "2606:4700::1", "1.1.1.1"]
+    assert ssrf.pick_safe_ips("dual.example.test", resolver=lambda _h: resolved) == [
+        "1.1.1.1",
+        "93.184.216.34",
+        "2606:4700::1",
+        "2606:4700::2",
+    ]
+
+
+def test_pick_safe_ips_empty_when_unresolvable() -> None:
+    from tgmonitor.executors import ssrf
+
+    assert ssrf.pick_safe_ips("nope.example.test", resolver=lambda _h: []) == []
+
+
+def test_pick_safe_ips_raises_if_any_address_internal() -> None:
+    from tgmonitor.executors import ssrf
+
+    resolved = ["93.184.216.34", "10.0.0.5"]
+    with pytest.raises(DestinationBlocked):
+        ssrf.pick_safe_ips("rebind.example.test", resolver=lambda _h: resolved)
+
+
+def test_pick_safe_ips_ipv6_only_target_kept() -> None:
+    """An IPv6-only name yields its (single) global address — not dropped."""
+    from tgmonitor.executors import ssrf
+
+    resolved = ["2606:4700:4700::1111"]
+    assert ssrf.pick_safe_ips("v6only.example.test", resolver=lambda _h: resolved) == [
+        "2606:4700:4700::1111"
+    ]

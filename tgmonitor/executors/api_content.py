@@ -53,7 +53,8 @@ async def run_api_content_check(config: CheckConfig, transport: Transport) -> Re
     except httpx.TimeoutException:
         transport_error = f"timed out after {config.timeout_s}s"
     except httpx.HTTPError as exc:
-        transport_error = f"connection failed: {exc.__class__.__name__}"
+        # Keep the message, not just the class — it names the actual fault.
+        transport_error = f"connection failed: {exc.__class__.__name__}: {exc}"
 
     latency_ms = int((time.monotonic() - start) * 1000)
 

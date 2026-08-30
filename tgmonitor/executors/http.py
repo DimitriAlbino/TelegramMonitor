@@ -34,11 +34,18 @@ class HttpTransport:
     Reuses a long-lived client for connection pooling; tests pass a fake.
 
     Redirects are followed manually so every hop is resolved, validated, and
-    **pinned to the vetted IP** (#39): we connect to the exact address we
-    checked (Host header + TLS SNI preserved for the original hostname), which
-    closes the DNS-rebinding TOCTOU that a check-by-name guard leaves open — a
-    name can no longer answer public to the guard and internal to the client.
-    An internal target at any hop raises DestinationBlocked.
+    **pinned to vetted IPs** (#39): we connect to the exact addresses we checked
+    (Host header + TLS SNI preserved for the original hostname), which closes
+    the DNS-rebinding TOCTOU that a check-by-name guard leaves open — a name can
+    no longer answer public to the guard and internal to the client.
+
+    Each hop's candidates (IPv4 first, then IPv6 — see ``pick_safe_ips``) are
+    tried in order, falling back to the next candidate only on
+    :class:`httpx.ConnectError` (instantly refused / unreachable), so a
+    dual-stack target stays monitorable from a single-stack network. Timeouts
+    are deliberately *not* retried per candidate — a blackholed address would
+    multiply the probe's wall clock — and surface immediately. An internal
+    target at any hop raises DestinationBlocked.
     """
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
@@ -53,15 +60,7 @@ class HttpTransport:
             logical = url  # hostname-based URL; redirects resolve against this
             resp: httpx.Response | None = None
             for _hop in range(MAX_REDIRECTS + 1):
-                pinned_url, headers, sni = _pin_target(logical)
-                extensions = {"sni_hostname": sni} if sni else None
-                resp = await client.get(
-                    pinned_url,
-                    timeout=timeout_s,
-                    follow_redirects=False,
-                    headers=headers,
-                    extensions=extensions,
-                )
+                resp = await self._get_pinned(client, logical, timeout_s)
                 location = resp.headers.get("location")
                 if not (follow_redirects and resp.is_redirect and location):
                     break
@@ -72,19 +71,45 @@ class HttpTransport:
             if owned:
                 await client.aclose()
 
+    async def _get_pinned(
+        self, client: httpx.AsyncClient, logical: str, timeout_s: float
+    ) -> httpx.Response:
+        """GET one hop, attempting each pinned candidate in order.
 
-def _pin_target(url: str) -> tuple[str, dict[str, str] | None, str | None]:
-    """Return ``(request_url, headers, sni_hostname)`` for an SSRF-safe GET.
+        Falls back to the next vetted address on ConnectError only; if every
+        candidate fails, the last connect error propagates.
+        """
+        last_error: httpx.ConnectError | None = None
+        for pinned_url, headers, sni in _pin_candidates(logical):
+            extensions = {"sni_hostname": sni} if sni else None
+            try:
+                return await client.get(
+                    pinned_url,
+                    timeout=timeout_s,
+                    follow_redirects=False,
+                    headers=headers,
+                    extensions=extensions,
+                )
+            except httpx.ConnectError as exc:
+                last_error = exc
+        assert last_error is not None  # _pin_candidates never returns an empty list
+        raise last_error
 
-    Validates the destination and, for a hostname, rewrites the URL to the vetted
-    IP while returning the headers (``Host``, plus a reconstructed
-    ``Authorization`` if the URL carried basic-auth userinfo — which the rewrite
-    strips) and SNI hostname to preserve routing, credentials, and TLS. Raises
-    :class:`DestinationBlocked` for an internal destination. An IP literal is
-    validated and used as-is; an unresolvable hostname is left untouched (it will
-    fail at connect). For the pass-through cases httpx handles any URL userinfo.
+
+def _pin_candidates(url: str) -> list[tuple[str, dict[str, str] | None, str | None]]:
+    """Return the ``(request_url, headers, sni_hostname)`` candidates for a hop.
+
+    Validates the destination and, for a hostname, rewrites the URL to each
+    vetted IP (ordered IPv4-first by :func:`pick_safe_ips`) while returning the
+    headers (``Host``, plus a reconstructed ``Authorization`` if the URL carried
+    basic-auth userinfo — which the rewrite strips) and SNI hostname to preserve
+    routing, credentials, and TLS. Raises :class:`DestinationBlocked` for an
+    internal destination. An IP literal is validated and returned as the single
+    candidate; an unresolvable hostname yields a single by-name candidate (it
+    will fail at connect). For the pass-through cases httpx handles any URL
+    userinfo.
     """
-    from tgmonitor.executors.ssrf import DestinationBlocked, is_blocked_ip, pick_safe_ip
+    from tgmonitor.executors.ssrf import DestinationBlocked, is_blocked_ip, pick_safe_ips
 
     parsed = urlparse(url)
     host = parsed.hostname
@@ -98,25 +123,28 @@ def _pin_target(url: str) -> tuple[str, dict[str, str] | None, str | None]:
     if literal is not None:
         if is_blocked_ip(literal):
             raise DestinationBlocked(f"target IP {literal} is a blocked internal address")
-        return url, None, None
+        return [(url, None, None)]
 
-    safe_ip = pick_safe_ip(host)  # raises if internal; None if unresolvable
-    if safe_ip is None:
-        return url, None, None
+    safe_ips = pick_safe_ips(host)  # raises if internal; [] if unresolvable
+    if not safe_ips:
+        return [(url, None, None)]
 
-    ip_netloc = f"[{safe_ip}]" if ":" in safe_ip else safe_ip
-    if parsed.port:
-        ip_netloc = f"{ip_netloc}:{parsed.port}"
-    pinned_url = parsed._replace(netloc=ip_netloc).geturl()
-    headers = {"Host": f"{host}:{parsed.port}" if parsed.port else host}
-    # Rewriting netloc to the IP drops any user:pass@ userinfo; reconstruct the
-    # basic-auth header so credential-bearing targets keep working.
-    if parsed.username is not None:
-        import base64
+    candidates: list[tuple[str, dict[str, str] | None, str | None]] = []
+    for safe_ip in safe_ips:
+        ip_netloc = f"[{safe_ip}]" if ":" in safe_ip else safe_ip
+        if parsed.port:
+            ip_netloc = f"{ip_netloc}:{parsed.port}"
+        pinned_url = parsed._replace(netloc=ip_netloc).geturl()
+        headers = {"Host": f"{host}:{parsed.port}" if parsed.port else host}
+        # Rewriting netloc to the IP drops any user:pass@ userinfo; reconstruct the
+        # basic-auth header so credential-bearing targets keep working.
+        if parsed.username is not None:
+            import base64
 
-        creds = f"{parsed.username}:{parsed.password or ''}".encode()
-        headers["Authorization"] = "Basic " + base64.b64encode(creds).decode()
-    return pinned_url, headers, host
+            creds = f"{parsed.username}:{parsed.password or ''}".encode()
+            headers["Authorization"] = "Basic " + base64.b64encode(creds).decode()
+        candidates.append((pinned_url, headers, host))
+    return candidates
 
 
 async def run_http_check(config: CheckConfig, transport: Transport) -> Result:
@@ -152,7 +180,9 @@ async def run_http_check(config: CheckConfig, transport: Transport) -> Result:
     except httpx.TimeoutException:
         transport_error = f"timed out after {config.timeout_s}s"
     except httpx.HTTPError as exc:
-        transport_error = f"connection failed: {exc.__class__.__name__}"
+        # Keep the message, not just the class: "All connection attempts failed"
+        # vs "refused" distinguishes an unreachable network from a closed port.
+        transport_error = f"connection failed: {exc.__class__.__name__}: {exc}"
 
     latency_ms = int((time.monotonic() - start) * 1000)
 
